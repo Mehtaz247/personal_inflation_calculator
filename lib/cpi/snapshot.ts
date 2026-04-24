@@ -1,7 +1,18 @@
 import snapshotJson from "@/data/cpi/cpi-combined-2024.json";
 import type { CpiSnapshot, MonthKey, SubgroupKey } from "./types";
+import { cpiSnapshotSchema } from "./schema";
 
-const snapshot = snapshotJson as unknown as CpiSnapshot;
+// Validate on module load. If the JSON drifts out of shape (MoSPI format
+// change, bad ingest), we want to fail loudly with a useful error rather
+// than compute silently wrong numbers.
+const parsed = cpiSnapshotSchema.safeParse(snapshotJson);
+if (!parsed.success) {
+  const issues = parsed.error.issues
+    .map((i) => `  - ${i.path.join(".")}: ${i.message}`)
+    .join("\n");
+  throw new Error(`Invalid CPI snapshot:\n${issues}`);
+}
+const snapshot = parsed.data as unknown as CpiSnapshot;
 
 export function getSnapshot(): CpiSnapshot {
   return snapshot;
