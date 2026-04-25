@@ -52,10 +52,47 @@ The JSON snapshot at `data/cpi/cpi-combined-2024.json` has provenance fields
 (`source`, `source_url`, `base_year`, `as_of_month`, `provenance_note`) and
 holds monthly subgroup indices plus the official subgroup weights.
 
-The shipped values are illustrative placeholders consistent with recent Indian
-CPI behaviour, rebased to 2024=100. To refresh with the live MoSPI release, edit
-that single file — the schema (loader `lib/cpi/snapshot.ts`) is the integration
-point.
+### Auto-refresh from MoSPI eSankhyiki API
+
+A GitHub Actions workflow refreshes the snapshot monthly from the official
+MoSPI CPI API (`api.mospi.gov.in/api/cpi/getCPIData`). MoSPI publishes
+around the 12th; the cron runs on the 15th to give a buffer.
+
+```
+.github/workflows/refresh-cpi.yml      monthly cron + on-demand trigger
+scripts/refresh-cpi.ts                 fetch -> transform -> validate -> write
+lib/cpi/sources/mospi-api.ts           HTTP layer (auth header + query param)
+lib/cpi/transform.ts                   API rows -> CpiSnapshot shape
+```
+
+The pipeline:
+
+1. Fetch the as-of month and the prior 13 months (so YoY at as-of works).
+2. Canonicalise rows by best-effort field-name matching against MoSPI's
+   response (the candidate keys live in `lib/cpi/transform.ts`).
+3. Build a `CpiSnapshot`, validate against the existing Zod schema.
+4. Run the contract tests.
+5. Commit only if the JSON content changed; push triggers Vercel redeploy.
+
+If anything fails (URL changed, response shape drifted, month not yet
+published), the workflow opens a GitHub issue and uploads the raw API
+responses as a build artifact for debugging.
+
+### Manual refresh
+
+```bash
+# Fetch and write (auto-detect latest month):
+npm run refresh:cpi
+
+# Pin a specific month:
+npm run refresh:cpi -- --as-of 2026-03
+
+# Validate without writing the file, and dump raw API responses:
+npm run refresh:cpi -- --dry-run --log-raw
+```
+
+If MoSPI requires an API key, set `MOSPI_API_KEY` in `.env.local` (and
+in repo Settings → Secrets → Actions for the workflow).
 
 ## Running locally
 
