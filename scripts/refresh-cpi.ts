@@ -21,7 +21,7 @@ interface Args {
 }
 
 function parseArgs(argv: string[]): Args {
-  const a: Args = { asOf: undefined, dryRun: false, logRaw: false, baseYear: 2024, months: 18 };
+  const a: Args = { asOf: undefined, dryRun: false, logRaw: false, baseYear: 2024, months: 38 };
   for (let i = 2; i < argv.length; i++) {
     const arg = argv[i];
     const next = () => argv[++i];
@@ -47,7 +47,7 @@ function printHelp() {
   console.log(`Refresh CPI snapshot from MoSPI eSankhyiki API.
   --as-of YYYY-MM     Anchor month (default: auto-detect latest published)
   --base-year N       CPI base year (default: 2024)
-  --months N          How many months to pull (default: 18)
+  --months N          How many months to pull (default: 38)
   --dry-run           Validate but don't write the snapshot file
   --log-raw           Persist raw API responses to tmp/mospi-raw/
   --help              This message
