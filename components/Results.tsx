@@ -9,7 +9,7 @@ import GapDecomposition from "./GapDecomposition";
 import TrendChart from "./TrendChart";
 import BasketComparison from "./BasketComparison";
 
-interface MonthlyPoint { month: string; personal: number; official: number }
+interface MonthlyPoint { month: string; personal: number | null; official: number }
 type Compute = ComputeResult & { monthly_series?: MonthlyPoint[]; state?: string; state_code?: number; spending_raw?: any };
 
 function pct(n: number, digits = 2): string {

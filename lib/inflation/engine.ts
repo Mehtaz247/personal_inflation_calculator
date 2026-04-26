@@ -5,7 +5,7 @@ import {
   getLatestMonth,
   getSubgroupWeight,
   getOfficialHeadline,
-  listAvailableMonths,
+  listGeneralMonths,
   DEFAULT_SECTOR,
 } from "@/lib/cpi/snapshot";
 import type { MonthKey, Sector } from "@/lib/cpi/types";
@@ -168,17 +168,30 @@ export function computeMonthlySeries(
   spending: SpendingInput,
   n_months = 24,
   sector: Sector = DEFAULT_SECTOR,
-): Array<{ month: MonthKey; personal: number; official: number }> {
-  const months = listAvailableMonths(sector);
+): Array<{ month: MonthKey; personal: number | null; official: number }> {
+  // Anchor on months whose YoY headline is computable (general index present
+  // in both current and prior year). The personal series is sparser because
+  // it needs division-level data on both sides — emit `null` for unavailable
+  // points so the chart leaves a gap instead of drawing a misleading 0%.
+  const generalMonths = new Set(listGeneralMonths(sector));
   const usable: MonthKey[] = [];
-  for (const m of months) {
+  for (const m of generalMonths) {
     const [y, mm] = m.split("-");
-    const prior = `${Number(y) - 1}-${mm}` as MonthKey;
-    if (months.includes(prior)) usable.push(m);
+    const prior = `${Number(y) - 1}-${mm}`;
+    if (generalMonths.has(prior as MonthKey)) usable.push(m);
   }
+  usable.sort();
   const tail = usable.slice(-n_months);
   return tail.map((month) => {
     const r = compute(spending, month, sector);
-    return { month, personal: r.personal_inflation, official: r.official_inflation };
+    // Sum of weights for categories whose division YoY actually resolved
+    // (i.e. produced a non-zero inflation reading). If everything is 0 it
+    // means division data is missing for this month → personal is null.
+    const resolvedWeight = r.categories.reduce(
+      (s, c) => s + (c.weight > 0 && c.inflation !== 0 ? c.weight : 0),
+      0,
+    );
+    const personal = resolvedWeight > 0.001 ? r.personal_inflation : null;
+    return { month, personal, official: r.official_inflation };
   });
 }

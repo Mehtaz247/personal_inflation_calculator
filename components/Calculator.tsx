@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useTransition, useEffect, useCallback } from "react";
+import { useState, useMemo, useTransition, useEffect } from "react";
 import { Sparkles, Loader2, ArrowRight, AlertTriangle, User, Briefcase, GraduationCap, Heart } from "lucide-react";
 import { compute, computeMonthlySeries } from "@/lib/inflation/engine";
 import type { UserCategoryKey } from "@/lib/cpi/categories";
@@ -102,6 +102,7 @@ export default function Calculator({ categories }: { categories: CategoryDescrip
   /* ── State-level async result ── */
   const [stateResult, setStateResult] = useState<any>(null);
   const [stateLoading, setStateLoading] = useState(false);
+  const [stateError, setStateError] = useState<string | null>(null);
 
   /* ── All-India result (client-side, instant) ── */
   const allIndiaResult = useMemo(() => {
@@ -112,55 +113,78 @@ export default function Calculator({ categories }: { categories: CategoryDescrip
     return { ...res, monthly_series: series, state: "All India", state_code: 0, spending_raw: spending };
   }, [spending, sector]);
 
-  /* ── Fetch state-level data when state != All India ── */
-  const fetchStateResult = useCallback(async () => {
+  /* ── Invalidate stale state result the moment inputs change so the UI
+        stops showing yesterday's number while a new fetch runs ── */
+  useEffect(() => {
     const stateCode = STATE_MAP[state];
     if (stateCode === 0 || stateCode === undefined) {
       setStateResult(null);
+      setStateLoading(false);
+      setStateError(null);
       return;
     }
     const total = Object.values(spending).reduce((s, v) => s + (v || 0), 0);
     if (total === 0) {
       setStateResult(null);
-      return;
-    }
-    setStateLoading(true);
-    try {
-      const res = await fetch("/api/compute", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ spending, sector, state_code: stateCode }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setStateResult({ ...data, state, state_code: stateCode, spending_raw: spending });
-      } else {
-        // Fallback to All India if state fetch fails
-        setStateResult(null);
-      }
-    } catch {
-      setStateResult(null);
-    } finally {
       setStateLoading(false);
-    }
-  }, [spending, sector, state]);
-
-  useEffect(() => {
-    const stateCode = STATE_MAP[state];
-    if (stateCode === 0 || stateCode === undefined) {
-      setStateResult(null);
+      setStateError(null);
       return;
     }
-    const total = Object.values(spending).reduce((s, v) => s + (v || 0), 0);
-    if (total === 0) return;
-    // Debounce state fetch
-    const timer = setTimeout(fetchStateResult, 400);
-    return () => clearTimeout(timer);
-  }, [fetchStateResult, state, spending, sector]);
+    setStateResult(null);
+    setStateError(null);
+    setStateLoading(true);
 
-  /* ── Choose which result to display ── */
+    let cancelled = false;
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch("/api/compute", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ spending, sector, state_code: stateCode }),
+        });
+        if (cancelled) return;
+        if (res.ok) {
+          const data = await res.json();
+          if (data.state_error) {
+            // Server fell back to All India because the MoSPI state call
+            // failed. Surface this loud-and-clear instead of silently
+            // labelling All-India numbers as the user's chosen state.
+            setStateError(data.state_error);
+            setStateResult({
+              ...data,
+              state: "All India (fallback)",
+              state_code: 0,
+              spending_raw: spending,
+            });
+          } else {
+            setStateResult({ ...data, state, state_code: stateCode, spending_raw: spending });
+          }
+        } else {
+          setStateError(`MoSPI request failed (HTTP ${res.status}).`);
+          setStateResult(null);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setStateError(err instanceof Error ? err.message : "Network error");
+          setStateResult(null);
+        }
+      } finally {
+        if (!cancelled) setStateLoading(false);
+      }
+    }, 400);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [state, spending, sector]);
+
+  /* ── Choose which result to display ──
+     When a state is selected, only show its result (or nothing while
+     loading). Falling back to All India during a state fetch was
+     misleading — users saw All India numbers under a "Gujarat" header. */
   const isStateSelected = STATE_MAP[state] !== 0;
-  const result = isStateSelected ? (stateResult ?? allIndiaResult) : allIndiaResult;
+  const result = isStateSelected ? stateResult : allIndiaResult;
 
   async function handleAiParse() {
     if (!aiText.trim()) return;
@@ -177,7 +201,14 @@ export default function Calculator({ categories }: { categories: CategoryDescrip
           if (data.error) {
             setParseError(data.error);
           } else {
-            setSpending(data);
+            const { state: parsedState, sector: parsedSector, ...spendingFields } = data ?? {};
+            setSpending(spendingFields);
+            if (typeof parsedState === "string" && parsedState in STATE_MAP) {
+              setState(parsedState);
+            }
+            if (parsedSector === "urban" || parsedSector === "rural" || parsedSector === "combined") {
+              setSector(parsedSector);
+            }
             setAiText("");
           }
         } else {
@@ -305,6 +336,21 @@ export default function Calculator({ categories }: { categories: CategoryDescrip
             </button>
           </div>
 
+          <p className="mb-6 text-[11px] leading-relaxed text-zinc-500">
+            All India numbers are pre-bundled from the snapshot. Picking a state
+            triggers a live call to the{" "}
+            <a
+              href="https://esankhyiki.mospi.gov.in/macroindicators?product=cpi&tab=table"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="text-zinc-400 underline decoration-zinc-700 underline-offset-2 hover:text-zinc-300"
+            >
+              MoSPI eSankhyiki CPI API
+            </a>{" "}
+            (base 2024=100, COICOP 2018) to fetch that state&apos;s 13 division
+            indices for the latest month and 12 months prior.
+          </p>
+
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             {categories.map((c) => (
               <label key={c.key} className="flex flex-col group">
@@ -335,11 +381,19 @@ export default function Calculator({ categories }: { categories: CategoryDescrip
         {stateLoading && (
           <div className="mb-4 flex items-center gap-2 rounded-xl border border-amber-900/40 bg-amber-950/20 px-4 py-3 text-sm text-amber-300">
             <Loader2 className="h-4 w-4 animate-spin" />
-            Loading {state} CPI data from MoSPI…
+            Fetching {state} CPI from the MoSPI eSankhyiki API…
           </div>
         )}
         {result ? (
           <Results result={result as any} />
+        ) : stateLoading ? (
+          <div className="flex h-full min-h-[400px] flex-col items-center justify-center rounded-2xl border border-dashed border-zinc-800 bg-zinc-900/20 p-8 text-center text-sm text-zinc-500">
+            <Loader2 className="mb-4 h-8 w-8 animate-spin text-zinc-600" />
+            <p className="mb-2 font-medium text-zinc-300">Calculating…</p>
+            <p className="max-w-xs">
+              Pulling division-level CPI for {state} ({sector}) from MoSPI.
+            </p>
+          </div>
         ) : (
           <div className="flex h-full min-h-[400px] flex-col items-center justify-center rounded-2xl border border-dashed border-zinc-800 bg-zinc-900/20 p-8 text-center text-sm text-zinc-500">
             <Sparkles className="mb-4 h-8 w-8 text-zinc-700" />

@@ -105,3 +105,10 @@ export function listAvailableMonths(sector: Sector = DEFAULT_SECTOR): MonthKey[]
   }
   return Array.from(months).sort() as MonthKey[];
 }
+
+/** All months that have a general (headline) CPI value for the sector. */
+export function listGeneralMonths(sector: Sector = DEFAULT_SECTOR): MonthKey[] {
+  const gi = snapshot.sectors[sector]?.general_index;
+  if (!gi) return [];
+  return Object.keys(gi).sort() as MonthKey[];
+}

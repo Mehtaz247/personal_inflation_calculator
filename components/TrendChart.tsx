@@ -1,11 +1,11 @@
 "use client";
 
-interface Point { month: string; personal: number; official: number }
+interface Point { month: string; personal: number | null; official: number }
 
 export default function TrendChart({ data }: { data: Point[] }) {
   if (data.length < 2) {
     return (
-      <div className="rounded-xl border border-ink-200 bg-white p-5 text-sm text-ink-500">
+      <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-5 text-sm text-zinc-400">
         Not enough monthly history yet to draw a trend (need ≥2 months of YoY).
       </div>
     );
@@ -18,29 +18,50 @@ export default function TrendChart({ data }: { data: Point[] }) {
   const PAD_T = 14;
   const PAD_B = 32;
 
-  const xs = data.map((_, i) => i);
-  const ys = data.flatMap((d) => [d.personal, d.official]);
+  const ys: number[] = [];
+  for (const d of data) {
+    ys.push(d.official);
+    if (d.personal != null) ys.push(d.personal);
+  }
   const ymin = Math.min(...ys);
   const ymax = Math.max(...ys);
   const span = Math.max(0.005, ymax - ymin);
   const yLo = ymin - span * 0.15;
   const yHi = ymax + span * 0.15;
 
-  const xScale = (i: number) => PAD_L + (i / Math.max(1, xs.length - 1)) * (W - PAD_L - PAD_R);
+  const xScale = (i: number) => PAD_L + (i / Math.max(1, data.length - 1)) * (W - PAD_L - PAD_R);
   const yScale = (v: number) => PAD_T + (1 - (v - yLo) / (yHi - yLo)) * (H - PAD_T - PAD_B);
 
-  const path = (key: "personal" | "official") =>
-    data.map((d, i) => `${i === 0 ? "M" : "L"} ${xScale(i).toFixed(1)} ${yScale(d[key]).toFixed(1)}`).join(" ");
+  // Personal line: skip null points (gap), restart M after each gap.
+  const personalPath = (() => {
+    let d = "";
+    let pen = "M";
+    data.forEach((p, i) => {
+      if (p.personal == null) {
+        pen = "M";
+        return;
+      }
+      d += `${pen} ${xScale(i).toFixed(1)} ${yScale(p.personal).toFixed(1)} `;
+      pen = "L";
+    });
+    return d.trim();
+  })();
+
+  const officialPath = data
+    .map((d, i) => `${i === 0 ? "M" : "L"} ${xScale(i).toFixed(1)} ${yScale(d.official).toFixed(1)}`)
+    .join(" ");
 
   const ticks = 4;
   const yTicks = Array.from({ length: ticks + 1 }, (_, i) => yLo + ((yHi - yLo) * i) / ticks);
 
   const xLabelEvery = Math.max(1, Math.floor(data.length / 6));
+  const personalPoints = data.filter((d) => d.personal != null);
+  const personalNote = personalPoints.length < data.length;
 
   return (
     <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6 shadow-sm backdrop-blur-md">
-      <div className="mb-4 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-zinc-100">Personal vs official inflation, monthly</h3>
+      <div className="mb-1 flex items-center justify-between">
+        <h3 className="text-sm font-semibold text-zinc-100">Personal vs official inflation</h3>
         <div className="flex items-center gap-3 text-xs text-zinc-400">
           <span className="flex items-center gap-1.5">
             <span className="inline-block h-0.5 w-4 bg-emerald-400" /> Personal
@@ -51,6 +72,15 @@ export default function TrendChart({ data }: { data: Point[] }) {
           </span>
         </div>
       </div>
+      <p className="mb-3 text-[11px] text-zinc-500">
+        Last {data.length} months · YoY %
+        {personalNote && (
+          <>
+            {" "}· personal series starts {shortMonth(personalPoints[0]?.month ?? "")} (division-level
+            CPI under base 2024=100 only available from Jan 2025)
+          </>
+        )}
+      </p>
       <svg viewBox={`0 0 ${W} ${H}`} className="w-full">
         {yTicks.map((t, i) => (
           <g key={i}>
@@ -74,14 +104,15 @@ export default function TrendChart({ data }: { data: Point[] }) {
             </text>
           ) : null,
         )}
-        <path d={path("official")} fill="none" stroke="#52525b" strokeWidth="1.5" strokeDasharray="4 3" />
-        <path d={path("personal")} fill="none" stroke="#34d399" strokeWidth="2" />
+        <path d={officialPath} fill="none" stroke="#52525b" strokeWidth="1.5" strokeDasharray="4 3" />
+        {personalPath && <path d={personalPath} fill="none" stroke="#34d399" strokeWidth="2" />}
       </svg>
     </div>
   );
 }
 
 function shortMonth(m: string): string {
+  if (!m) return "";
   const [y, mm] = m.split("-");
   const months = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
   return `${months[Number(mm) - 1]} ${y.slice(2)}`;

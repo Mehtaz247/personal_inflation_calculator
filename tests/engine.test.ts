@@ -103,8 +103,13 @@ describe("computeMonthlySeries", () => {
       expect(series[i].month > series[i - 1].month).toBe(true);
     }
     for (const p of series) {
-      expect(Number.isFinite(p.personal)).toBe(true);
+      // personal can be null when division-level data isn't available for that
+      // month (pre-Jan 2025 under base 2024=100), but official must always
+      // resolve since the series is anchored on general-index availability.
+      expect(p.personal === null || Number.isFinite(p.personal)).toBe(true);
       expect(Number.isFinite(p.official)).toBe(true);
     }
+    // At least one point should have a real personal reading.
+    expect(series.some((p) => p.personal != null)).toBe(true);
   });
 });
