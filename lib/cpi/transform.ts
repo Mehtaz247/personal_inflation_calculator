@@ -1,70 +1,54 @@
-/**
- * Transform MoSPI eSankhyiki CPI API rows into our CpiSnapshot JSON shape.
- *
- * Two unknowns until we see a real response:
- *   1. The exact field names (e.g. `index_value` vs `cpi_index` vs `value`).
- *   2. How groups vs subgroups are distinguished (level field, group_code,
- *      or just a flat name).
- *
- * Strategy: pick the fields by best-effort key matching against a list of
- * common candidates, and if a field can't be located on a row we throw
- * with the row's actual keys. This way the first real run either succeeds
- * or tells us exactly what to add to the candidate lists.
- */
-
-import type { CpiSnapshot, MonthKey } from "@/lib/cpi/types";
+import type { CpiSnapshot, MonthKey, Sector, CpiSectorData } from "@/lib/cpi/types";
 
 interface CanonicalRow {
   sector: string;
-  groupName: string;
-  subgroupName: string | null;
+  divisionName: string;
+  code: string | null;
   indexValue: number;
+  inflationPct: number | null;
 }
 
 interface SubgroupSpec {
-  key: string;             // our internal key
+  key: string;
   label: string;
   weight: number;
-  level: "group" | "subgroup";
-  matchNames: string[];    // tolerate spelling/punctuation variants
+  code: string;
+  matchNames: string[];
 }
 
-/**
- * Mapping from our internal subgroup keys to the MoSPI label they should
- * match. `level` distinguishes top-level groups (e.g. "Food and beverages")
- * from subgroups under Miscellaneous (e.g. "Health"). Weights here are the
- * official 2012-base weights as placeholders — refresh updates them from
- * the API too if the API returns weights, otherwise they stay as configured.
- */
 export const SUBGROUP_SPECS: SubgroupSpec[] = [
-  { key: "food_and_beverages",           label: "Food and beverages",           weight: 0.4587, level: "group",    matchNames: ["food and beverages", "food & beverages"] },
-  { key: "pan_tobacco_and_intoxicants",  label: "Pan, tobacco and intoxicants", weight: 0.0238, level: "group",    matchNames: ["pan, tobacco and intoxicants", "pan tobacco and intoxicants", "pan, tobacco & intoxicants"] },
-  { key: "clothing_and_footwear",        label: "Clothing and footwear",        weight: 0.0653, level: "group",    matchNames: ["clothing and footwear", "clothing & footwear"] },
-  { key: "housing",                      label: "Housing",                      weight: 0.1007, level: "group",    matchNames: ["housing"] },
-  { key: "fuel_and_light",               label: "Fuel and light",               weight: 0.0684, level: "group",    matchNames: ["fuel and light", "fuel & light"] },
-  { key: "household_goods_and_services", label: "Household goods and services", weight: 0.0380, level: "subgroup", matchNames: ["household goods and services", "household goods & services"] },
-  { key: "health",                       label: "Health",                       weight: 0.0589, level: "subgroup", matchNames: ["health"] },
-  { key: "transport_and_communication",  label: "Transport and communication",  weight: 0.0859, level: "subgroup", matchNames: ["transport and communication", "transport & communication"] },
-  { key: "recreation_and_amusement",     label: "Recreation and amusement",     weight: 0.0168, level: "subgroup", matchNames: ["recreation and amusement", "recreation & amusement"] },
-  { key: "education",                    label: "Education",                    weight: 0.0446, level: "subgroup", matchNames: ["education"] },
-  { key: "personal_care_and_effects",    label: "Personal care and effects",    weight: 0.0389, level: "subgroup", matchNames: ["personal care and effects", "personal care & effects"] },
+  { key: "food_and_beverages",        code: "01", label: "Food and beverages",                                                  weight: 0.3968, matchNames: ["food and beverages", "food & beverages"] },
+  { key: "pan_tobacco_and_intoxicants", code: "02", label: "Paan, tobacco and intoxicants",                                       weight: 0.0213, matchNames: ["paan, tobacco and intoxicants", "pan, tobacco and intoxicants", "paan tobacco and intoxicants", "pan tobacco and intoxicants"] },
+  { key: "clothing_and_footwear",     code: "03", label: "Clothing and footwear",                                               weight: 0.0653, matchNames: ["clothing and footwear", "clothing & footwear"] },
+  { key: "housing_utilities",         code: "04", label: "Housing, water, electricity, gas and other fuels",                    weight: 0.1527, matchNames: ["housing, water, electricity, gas and other fuels", "housing water electricity gas and other fuels"] },
+  { key: "furnishings_household",     code: "05", label: "Furnishings, household equipment and routine household maintenance",  weight: 0.0380, matchNames: ["furnishings, household equipment and routine household maintenance", "furnishings household equipment and routine household maintenance"] },
+  { key: "health",                    code: "06", label: "Health",                                                              weight: 0.0589, matchNames: ["health"] },
+  { key: "transport",                 code: "07", label: "Transport",                                                           weight: 0.0630, matchNames: ["transport"] },
+  { key: "information_communication", code: "08", label: "Information and communication",                                       weight: 0.0259, matchNames: ["information and communication", "information & communication"] },
+  { key: "recreation_culture",        code: "09", label: "Recreation, sport and culture",                                       weight: 0.0168, matchNames: ["recreation, sport and culture", "recreation sport and culture"] },
+  { key: "education_services",        code: "10", label: "Education services",                                                  weight: 0.0446, matchNames: ["education services", "education"] },
+  { key: "restaurants_accommodation", code: "11", label: "Restaurants and accommodation services",                              weight: 0.0263, matchNames: ["restaurants and accommodation services", "restaurants & accommodation services"] },
+  { key: "personal_care_misc",        code: "12", label: "Personal care, social protection and miscellaneous goods and services", weight: 0.0904, matchNames: ["personal care, social protection and miscellaneous goods and services", "personal care social protection and miscellaneous goods and services"] },
 ];
 
 const KEY_CANDIDATES = {
   sector:       ["sector", "geography", "area", "region"],
-  group:        ["group_name", "group", "groupName", "main_group"],
+  division:     ["division", "group_name", "group", "groupName", "main_group", "category"],
   subgroup:     ["subgroup_name", "sub_group_name", "sub_group", "subgroup", "subgroupName"],
-  index:        ["index_value", "indexvalue", "value", "cpi_index", "index", "all_india_index"],
+  klass:        ["class", "klass"],
+  subClass:     ["sub_class", "subclass"],
+  item:         ["item"],
+  index:        ["index", "index_value", "indexvalue", "value", "cpi_index", "all_india_index"],
+  inflation:    ["inflation", "inflation_rate"],
+  code:         ["code", "division_code"],
   baseYear:     ["base_year", "baseyear", "base"],
   year:         ["year"],
   monthCode:    ["month_code", "monthcode", "month"],
-  monthName:    ["month_name", "monthname"],
 };
 
 function pickField(row: Record<string, unknown>, candidates: string[]): unknown {
   for (const key of candidates) {
     if (key in row) return row[key];
-    // case-insensitive fallback
     const found = Object.keys(row).find((k) => k.toLowerCase() === key.toLowerCase());
     if (found) return row[found];
   }
@@ -73,7 +57,8 @@ function pickField(row: Record<string, unknown>, candidates: string[]): unknown 
 
 function asString(x: unknown): string | null {
   if (x == null) return null;
-  return String(x).trim();
+  const s = String(x).trim();
+  return s.length === 0 ? null : s;
 }
 
 function asNumber(x: unknown): number | null {
@@ -88,40 +73,48 @@ function normalize(name: string): string {
 
 export function canonicalizeRow(row: Record<string, unknown>): CanonicalRow | null {
   const sector = asString(pickField(row, KEY_CANDIDATES.sector)) ?? "";
-  const group = asString(pickField(row, KEY_CANDIDATES.group));
-  const subgroup = asString(pickField(row, KEY_CANDIDATES.subgroup));
+  const division = asString(pickField(row, KEY_CANDIDATES.division));
   const indexValue = asNumber(pickField(row, KEY_CANDIDATES.index));
+  const code = asString(pickField(row, KEY_CANDIDATES.code));
+  const subgroup = asString(pickField(row, KEY_CANDIDATES.subgroup));
+  const klass = asString(pickField(row, KEY_CANDIDATES.klass));
+  const subClass = asString(pickField(row, KEY_CANDIDATES.subClass));
+  const item = asString(pickField(row, KEY_CANDIDATES.item));
+  const inflationPct = asNumber(pickField(row, KEY_CANDIDATES.inflation));
 
-  if (!group || indexValue == null) return null;
-  return {
-    sector,
-    groupName: group,
-    subgroupName: subgroup && subgroup !== group ? subgroup : null,
-    indexValue,
-  };
+  if (!division || indexValue == null) return null;
+  // Only keep top-level division rows (no group/class/sub_class/item).
+  if (subgroup || klass || subClass || item) return null;
+  return { sector, divisionName: division, code, indexValue, inflationPct };
 }
 
-/**
- * Find the index value for a given subgroup spec from a list of canonical
- * rows for one month + sector. Returns null if not found.
- */
-export function pickIndexForSubgroup(
-  rows: CanonicalRow[],
-  spec: SubgroupSpec,
-): number | null {
+export function pickIndexForSubgroup(rows: CanonicalRow[], spec: SubgroupSpec): number | null {
+  const byCode = rows.find((r) => r.code === spec.code);
+  if (byCode) return byCode.indexValue;
   const targetNames = spec.matchNames.map(normalize);
-  const match = rows.find((r) => {
-    const name = normalize(spec.level === "group" ? r.groupName : r.subgroupName ?? "");
-    return targetNames.includes(name);
-  });
+  const match = rows.find((r) => targetNames.includes(normalize(r.divisionName)));
   return match?.indexValue ?? null;
+}
+
+export function pickHeadline(rows: CanonicalRow[]): { index: number | null; inflation: number | null } {
+  const m = rows.find((r) => normalize(r.divisionName).includes("cpi (general)") || normalize(r.divisionName) === "general");
+  return { index: m?.indexValue ?? null, inflation: m?.inflationPct ?? null };
+}
+
+const SECTOR_NAMES: Record<Sector, string[]> = {
+  combined: ["combined", "rural+urban combined", "all-india"],
+  urban: ["urban"],
+  rural: ["rural"],
+};
+
+function rowsForSector(rows: CanonicalRow[], sector: Sector): CanonicalRow[] {
+  const targets = SECTOR_NAMES[sector];
+  return rows.filter((r) => targets.includes(normalize(r.sector)));
 }
 
 export interface BuildSnapshotInput {
   asOfMonth: MonthKey;
   baseYear: number;
-  sector: string;
-  /** rows keyed by `${year}-${MM}` */
   monthlyRows: Record<MonthKey, CanonicalRow[]>;
   sourceUrl: string;
   series_id?: string;
@@ -130,28 +123,41 @@ export interface BuildSnapshotInput {
   provenance_note?: string;
 }
 
-export function buildSnapshot(input: BuildSnapshotInput): CpiSnapshot {
+function buildSectorData(rowsByMonth: Record<MonthKey, CanonicalRow[]>, sector: Sector): CpiSectorData {
   const indices: Record<string, Record<MonthKey, number>> = {};
   for (const spec of SUBGROUP_SPECS) {
     indices[spec.key] = {};
-    for (const [month, rows] of Object.entries(input.monthlyRows)) {
-      const sectorRows = rows.filter(
-        (r) => normalize(r.sector) === normalize(input.sector) || r.sector === "",
-      );
+    for (const [month, allRows] of Object.entries(rowsByMonth)) {
+      const sectorRows = rowsForSector(allRows, sector);
       const value = pickIndexForSubgroup(sectorRows, spec);
       if (value != null) indices[spec.key][month as MonthKey] = round3(value);
     }
   }
-
   const subgroups = Object.fromEntries(
-    SUBGROUP_SPECS.map((s) => [s.key, { label: s.label, weight: s.weight }]),
+    SUBGROUP_SPECS.map((s) => [s.key, { label: s.label, weight: s.weight, code: s.code }]),
   );
+  return { subgroups, indices };
+}
+
+export function buildSnapshot(input: BuildSnapshotInput): CpiSnapshot {
+  const sectors: Record<Sector, CpiSectorData> = {
+    combined: buildSectorData(input.monthlyRows, "combined"),
+    urban: buildSectorData(input.monthlyRows, "urban"),
+    rural: buildSectorData(input.monthlyRows, "rural"),
+  };
+
+  const headline: Partial<Record<Sector, number>> = {};
+  const asOfRows = input.monthlyRows[input.asOfMonth] ?? [];
+  for (const sector of ["combined", "urban", "rural"] as Sector[]) {
+    const h = pickHeadline(rowsForSector(asOfRows, sector));
+    if (h.inflation != null) headline[sector] = round3(h.inflation / 100);
+  }
 
   return {
-    series_id: input.series_id ?? "india-cpi-combined-2024",
+    series_id: input.series_id ?? "india-cpi-2024",
     description:
       input.description ??
-      `India CPI (${input.sector}) — subgroup indices, base ${input.baseYear}=100`,
+      `India CPI (Combined / Urban / Rural) — division indices, base ${input.baseYear}=100 (COICOP 2018)`,
     source: input.source ?? "Ministry of Statistics and Programme Implementation (MoSPI), Government of India",
     source_url: input.sourceUrl,
     base_year: input.baseYear,
@@ -160,9 +166,9 @@ export function buildSnapshot(input: BuildSnapshotInput): CpiSnapshot {
     currency_unit: `index (base ${input.baseYear} = 100)`,
     provenance_note:
       input.provenance_note ??
-      `Auto-refreshed from MoSPI eSankhyiki CPI API on ${new Date().toISOString().slice(0, 10)}.`,
-    subgroups,
-    indices,
+      `Auto-refreshed from MoSPI eSankhyiki CPI API on ${new Date().toISOString().slice(0, 10)}. Division weights are MoSPI's published 2024-base CPI weights derived from HCES 2023-24 (COICOP 2018 framework).`,
+    official_headline: headline,
+    sectors,
   };
 }
 

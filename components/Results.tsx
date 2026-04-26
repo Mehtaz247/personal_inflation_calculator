@@ -1,6 +1,11 @@
 "use client";
 
 import type { ComputeResult } from "@/lib/inflation/engine";
+import GapDecomposition from "./GapDecomposition";
+import TrendChart from "./TrendChart";
+
+interface MonthlyPoint { month: string; personal: number; official: number }
+type Compute = ComputeResult & { monthly_series?: MonthlyPoint[] };
 
 function pct(n: number, digits = 2): string {
   return `${(n * 100).toFixed(digits)}%`;
@@ -18,7 +23,7 @@ export default function Results({
   explainLoading,
   onExplain,
 }: {
-  result: ComputeResult;
+  result: Compute;
   explanation: { text: string; source: string } | null;
   explainLoading: boolean;
   onExplain: () => void;
@@ -46,9 +51,16 @@ export default function Results({
         </div>
         <p className="mt-3 text-xs text-ink-500">
           Based on monthly spending of ₹{result.total_spend.toLocaleString("en-IN")} · as of{" "}
-          {formatMonth(result.as_of_month)} · CPI base {result.base_year}=100
+          {formatMonth(result.as_of_month)} · CPI base {result.base_year}=100 · sector{" "}
+          <span className="font-medium uppercase">{result.sector}</span>
         </p>
       </div>
+
+      {result.monthly_series && result.monthly_series.length > 1 && (
+        <TrendChart data={result.monthly_series} />
+      )}
+
+      <GapDecomposition rows={result.gap_decomposition} />
 
       <div className="rounded-xl border border-ink-200 bg-white p-5 shadow-sm">
         <h3 className="mb-3 text-sm font-semibold text-ink-900">
@@ -86,12 +98,24 @@ export default function Results({
           <h3 className="text-sm font-semibold text-ink-900">Plain-English summary</h3>
           {explanation && (
             <span className="rounded-full bg-ink-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-ink-500">
-              {explanation.source === "anthropic" ? "AI-generated" : "Deterministic"}
+              {explanation.source === "gemini" ? "Gemini" : "Deterministic"}
             </span>
           )}
         </div>
         {explanation ? (
-          <p className="text-sm leading-relaxed text-ink-700">{explanation.text}</p>
+          <div>
+            <p className="text-sm leading-relaxed text-ink-700">{explanation.text}</p>
+            {explanation.source === "gemini" && (
+              <button
+                type="button"
+                onClick={onExplain}
+                disabled={explainLoading}
+                className="mt-3 rounded-lg border border-ink-200 bg-white px-3 py-1 text-xs font-medium text-ink-700 hover:bg-ink-50 disabled:opacity-50"
+              >
+                {explainLoading ? "Regenerating…" : "Regenerate"}
+              </button>
+            )}
+          </div>
         ) : (
           <button
             type="button"
@@ -102,6 +126,26 @@ export default function Results({
             {explainLoading ? "Thinking…" : "Explain these numbers"}
           </button>
         )}
+      </div>
+
+      <div className="rounded-xl border border-ink-100 bg-ink-50 px-5 py-3 text-xs text-ink-500">
+        <p>
+          Official MoSPI headline CPI (YoY):{" "}
+          <span className="font-semibold text-ink-700">
+            {result.official_headline != null
+              ? pct(result.official_headline)
+              : "N/A"}
+          </span>
+          {" · "}
+          Recomputed weighted avg:{" "}
+          <span className="font-semibold text-ink-700">{pct(result.official_inflation)}</span>
+          {" · "}
+          Your personal rate:{" "}
+          <span className="font-semibold text-ink-700">{pct(result.personal_inflation)}</span>
+        </p>
+        <p className="mt-1 italic">
+          Source: MoSPI, base {result.base_year}=100, {formatMonth(result.as_of_month)}.
+        </p>
       </div>
     </div>
   );

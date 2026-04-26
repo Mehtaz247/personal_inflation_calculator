@@ -1,7 +1,7 @@
-import Anthropic from "@anthropic-ai/sdk";
+import { GoogleGenAI } from "@google/genai";
 import type { ComputeResult } from "@/lib/inflation/engine";
 
-const MODEL = "claude-haiku-4-5";
+const MODEL = "gemini-1.5-pro";
 
 function pct(n: number): string {
   return `${(n * 100).toFixed(2)}%`;
@@ -13,17 +13,12 @@ function pp(n: number): string {
   return `${sign}${Math.abs(v).toFixed(2)} pp`;
 }
 
-/** Deterministic fallback — used when no ANTHROPIC_API_KEY is configured. */
 export function deterministicExplanation(result: ComputeResult): string {
   if (result.total_spend === 0) {
     return "Enter your monthly spending to see how your personal inflation compares to the official CPI.";
   }
   const direction =
-    result.gap > 0.0005
-      ? "higher than"
-      : result.gap < -0.0005
-        ? "lower than"
-        : "in line with";
+    result.gap > 0.0005 ? "higher than" : result.gap < -0.0005 ? "lower than" : "in line with";
   const driverNames = result.top_drivers
     .filter((d) => d.weight > 0)
     .map((d) => d.label)
@@ -40,14 +35,13 @@ export function deterministicExplanation(result: ComputeResult): string {
 
 export async function generateExplanation(result: ComputeResult): Promise<{
   text: string;
-  source: "anthropic" | "fallback";
+  source: "gemini" | "fallback";
 }> {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+  const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey || result.total_spend === 0) {
     return { text: deterministicExplanation(result), source: "fallback" };
   }
 
-  const client = new Anthropic({ apiKey });
   const drivers = result.top_drivers
     .filter((d) => d.weight > 0)
     .map((d) => ({
@@ -57,39 +51,70 @@ export async function generateExplanation(result: ComputeResult): Promise<{
       contribution_pp: +(d.contribution * 100).toFixed(2),
     }));
 
+  const decomp = result.gap_decomposition.filter((g) => Math.abs(g.gap_contribution) > 1e-7);
+  const positives = decomp
+    .filter((g) => g.gap_contribution > 0)
+    .sort((a, b) => b.gap_contribution - a.gap_contribution)
+    .slice(0, 3)
+    .map((g) => ({
+      category: g.label,
+      your_weight_pct: +(g.your_weight * 100).toFixed(1),
+      national_weight_pct: +(g.national_weight * 100).toFixed(1),
+      gap_contribution_pp: +(g.gap_contribution * 100).toFixed(2),
+    }));
+  const negatives = decomp
+    .filter((g) => g.gap_contribution < 0)
+    .sort((a, b) => a.gap_contribution - b.gap_contribution)
+    .slice(0, 2)
+    .map((g) => ({
+      category: g.label,
+      your_weight_pct: +(g.your_weight * 100).toFixed(1),
+      national_weight_pct: +(g.national_weight * 100).toFixed(1),
+      gap_contribution_pp: +(g.gap_contribution * 100).toFixed(2),
+    }));
+
+  const mostDivergent = decomp
+    .slice()
+    .sort((a, b) => Math.abs(b.weight_diff) - Math.abs(a.weight_diff))[0];
+
   const facts = {
     as_of_month: result.as_of_month,
+    sector: result.sector,
     personal_inflation_pct: +(result.personal_inflation * 100).toFixed(2),
     official_inflation_pct: +(result.official_inflation * 100).toFixed(2),
     gap_pp: +(result.gap * 100).toFixed(2),
     top_drivers: drivers,
+    top_positive_gap_contributors: positives,
+    top_negative_gap_contributors: negatives,
+    most_divergent_weight: mostDivergent
+      ? {
+          category: mostDivergent.label,
+          your_weight_pct: +(mostDivergent.your_weight * 100).toFixed(1),
+          national_weight_pct: +(mostDivergent.national_weight * 100).toFixed(1),
+        }
+      : null,
   };
 
   const systemPrompt =
-    "You explain a household's personal inflation result in 2–3 sentences of plain English. " +
-    "Rules: use only the numbers in the JSON facts (do not invent any), do not give financial advice, " +
-    "do not hedge excessively, do not use emojis, do not use markdown. " +
-    "Tone: concise, neutral, credible. Compare personal inflation to official CPI, mention the gap, " +
-    "and name the top 1–3 drivers. Refer to the as-of month naturally (e.g. 'March 2026').";
+    "You write a 3-4 sentence explanation of an Indian household's personal inflation result. " +
+    "Strict rules: use only the numbers in the JSON facts; do not invent figures or distort the gap sign; " +
+    "do not give financial advice; no emojis; no markdown. Mention at least one specific COICOP division name " +
+    "and a specific weight comparison (e.g. 'you spend 25% on Food vs the national 40%'). Refer to the as-of " +
+    "month in plain English (e.g. 'March 2026'). Tone: concise, neutral, credible.";
 
-  const message = await client.messages.create({
+  const client = new GoogleGenAI({ apiKey });
+  const response = await client.models.generateContent({
     model: MODEL,
-    max_tokens: 300,
-    system: systemPrompt,
-    messages: [
+    contents: [
       {
         role: "user",
-        content: `Facts:\n${JSON.stringify(facts, null, 2)}`,
+        parts: [{ text: `${systemPrompt}\n\nFacts:\n${JSON.stringify(facts, null, 2)}` }],
       },
     ],
+    config: { maxOutputTokens: 400, temperature: 0.4 },
   });
 
-  const text = message.content
-    .filter((b): b is Anthropic.TextBlock => b.type === "text")
-    .map((b) => b.text)
-    .join("\n")
-    .trim();
-
+  const text = (response.text ?? "").trim();
   if (!text) return { text: deterministicExplanation(result), source: "fallback" };
-  return { text, source: "anthropic" };
+  return { text, source: "gemini" };
 }

@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import type { ComputeResult } from "@/lib/inflation/engine";
 import type { UserCategoryKey } from "@/lib/cpi/categories";
+import type { Sector } from "@/lib/cpi/types";
 import Results from "./Results";
 
 interface CategoryDescriptor {
@@ -11,45 +12,34 @@ interface CategoryDescriptor {
   description: string;
 }
 
+interface MonthlyPoint { month: string; personal: number; official: number }
+type Compute = ComputeResult & { monthly_series?: MonthlyPoint[] };
+
 const PRESETS: Record<string, Partial<Record<UserCategoryKey, number>>> = {
   "Urban renter": {
-    food: 15000,
-    housing: 25000,
-    fuel_utilities: 2500,
-    transport: 6000,
-    healthcare: 2000,
-    education: 3000,
-    clothing: 2000,
-    household_personal: 3000,
-    miscellaneous: 2500,
+    food: 15000, eating_out: 4000, housing: 27500,
+    transport: 6000, communication: 1200,
+    healthcare: 2000, education: 3000, clothing: 2000,
+    household_personal: 3000, entertainment: 1500, tobacco_alcohol: 0,
   },
   "Family with kids": {
-    food: 22000,
-    housing: 18000,
-    fuel_utilities: 3500,
-    transport: 8000,
-    healthcare: 4000,
-    education: 12000,
-    clothing: 3000,
-    household_personal: 4000,
-    miscellaneous: 3000,
+    food: 22000, eating_out: 3000, housing: 21500,
+    transport: 8000, communication: 1500,
+    healthcare: 4000, education: 12000, clothing: 3000,
+    household_personal: 4000, entertainment: 1500, tobacco_alcohol: 0,
   },
   "Retired household": {
-    food: 12000,
-    housing: 8000,
-    fuel_utilities: 2500,
-    transport: 2500,
-    healthcare: 10000,
-    education: 0,
-    clothing: 1500,
-    household_personal: 2500,
-    miscellaneous: 2000,
+    food: 12000, eating_out: 1000, housing: 10500,
+    transport: 2500, communication: 800,
+    healthcare: 10000, education: 0, clothing: 1500,
+    household_personal: 2500, entertainment: 1000, tobacco_alcohol: 0,
   },
 };
 
 export default function Calculator({ categories }: { categories: CategoryDescriptor[] }) {
   const [spending, setSpending] = useState<Partial<Record<UserCategoryKey, number>>>({});
-  const [result, setResult] = useState<ComputeResult | null>(null);
+  const [sector, setSector] = useState<Sector>("combined");
+  const [result, setResult] = useState<Compute | null>(null);
   const [explanation, setExplanation] = useState<{ text: string; source: string } | null>(null);
   const [explainLoading, setExplainLoading] = useState(false);
   const [isPending, startTransition] = useTransition();
@@ -79,10 +69,10 @@ export default function Calculator({ categories }: { categories: CategoryDescrip
       const res = await fetch("/api/compute", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ spending }),
+        body: JSON.stringify({ spending, sector }),
       });
       if (!res.ok) return;
-      const data = (await res.json()) as ComputeResult;
+      const data = (await res.json()) as Compute;
       setResult(data);
     });
   }
@@ -94,7 +84,7 @@ export default function Calculator({ categories }: { categories: CategoryDescrip
       const res = await fetch("/api/explain", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ spending }),
+        body: JSON.stringify({ spending, sector }),
       });
       if (!res.ok) return;
       const data = (await res.json()) as { text: string; source: string };
@@ -112,14 +102,14 @@ export default function Calculator({ categories }: { categories: CategoryDescrip
   return (
     <div className="grid gap-6 md:grid-cols-[1.1fr_1fr]">
       <section className="rounded-xl border border-ink-200 bg-white p-5 shadow-sm">
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-4 flex items-center justify-between gap-3">
           <h2 className="text-base font-semibold text-ink-900">Your monthly spending (₹)</h2>
           <div className="text-sm text-ink-500">
             Total: <span className="font-semibold text-ink-800">₹{total.toLocaleString("en-IN")}</span>
           </div>
         </div>
 
-        <div className="mb-4 flex flex-wrap gap-2">
+        <div className="mb-4 flex flex-wrap items-center gap-2">
           {Object.keys(PRESETS).map((name) => (
             <button
               key={name}
@@ -137,6 +127,18 @@ export default function Calculator({ categories }: { categories: CategoryDescrip
           >
             Reset
           </button>
+          <label className="ml-auto flex items-center gap-2 text-xs text-ink-600">
+            Sector
+            <select
+              value={sector}
+              onChange={(e) => { setSector(e.target.value as Sector); setResult(null); setExplanation(null); }}
+              className="rounded border border-ink-200 bg-white px-2 py-1 text-xs text-ink-800"
+            >
+              <option value="combined">Combined</option>
+              <option value="urban">Urban</option>
+              <option value="rural">Rural</option>
+            </select>
+          </label>
         </div>
 
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">

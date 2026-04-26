@@ -1,10 +1,7 @@
 import snapshotJson from "@/data/cpi/cpi-combined-2024.json";
-import type { CpiSnapshot, MonthKey, SubgroupKey } from "./types";
+import type { CpiSnapshot, MonthKey, Sector } from "./types";
 import { cpiSnapshotSchema } from "./schema";
 
-// Validate on module load. If the JSON drifts out of shape (MoSPI format
-// change, bad ingest), we want to fail loudly with a useful error rather
-// than compute silently wrong numbers.
 const parsed = cpiSnapshotSchema.safeParse(snapshotJson);
 if (!parsed.success) {
   const issues = parsed.error.issues
@@ -14,6 +11,8 @@ if (!parsed.success) {
 }
 const snapshot = parsed.data as unknown as CpiSnapshot;
 
+export const DEFAULT_SECTOR: Sector = "combined";
+
 export function getSnapshot(): CpiSnapshot {
   return snapshot;
 }
@@ -22,21 +21,21 @@ export function getLatestMonth(): MonthKey {
   return snapshot.as_of_month;
 }
 
+export function getOfficialHeadline(sector: Sector = DEFAULT_SECTOR): number | undefined {
+  return snapshot.official_headline?.[sector];
+}
+
 function shiftYear(month: MonthKey, years: number): MonthKey {
   const [y, m] = month.split("-");
   return `${Number(y) + years}-${m}` as MonthKey;
 }
 
-/**
- * YoY inflation for a subgroup at a given month.
- * Uses index-level math: (index_m / index_{m minus 12}) - 1.
- * Returns null when the prior-year reading is missing — callers must handle.
- */
 export function subgroupYoY(
-  subgroup: SubgroupKey | string,
+  subgroup: string,
   month: MonthKey = snapshot.as_of_month,
+  sector: Sector = DEFAULT_SECTOR,
 ): number | null {
-  const series = snapshot.indices[subgroup];
+  const series = snapshot.sectors[sector]?.indices[subgroup];
   if (!series) return null;
   const current = series[month];
   const prior = series[shiftYear(month, -1)];
@@ -44,25 +43,37 @@ export function subgroupYoY(
   return current / prior - 1;
 }
 
-/**
- * Official headline CPI YoY — weighted combination of subgroup YoY using the
- * weights stored in the snapshot. Keeping this derived (rather than hardcoded)
- * means refreshing weights in the JSON automatically refreshes the headline.
- */
-export function headlineYoY(month: MonthKey = snapshot.as_of_month): number {
+export function headlineYoY(
+  month: MonthKey = snapshot.as_of_month,
+  sector: Sector = DEFAULT_SECTOR,
+): number {
+  const sec = snapshot.sectors[sector];
+  if (!sec) return 0;
   let total = 0;
-  for (const [key, meta] of Object.entries(snapshot.subgroups)) {
-    const r = subgroupYoY(key, month);
+  for (const [key, meta] of Object.entries(sec.subgroups)) {
+    const r = subgroupYoY(key, month, sector);
     if (r == null) continue;
     total += meta.weight * r;
   }
   return total;
 }
 
-export function listSubgroups(): Array<{ key: string; label: string; weight: number }> {
-  return Object.entries(snapshot.subgroups).map(([key, m]) => ({
-    key,
-    label: m.label,
-    weight: m.weight,
-  }));
+export function listSubgroups(sector: Sector = DEFAULT_SECTOR): Array<{ key: string; label: string; weight: number }> {
+  const sec = snapshot.sectors[sector];
+  if (!sec) return [];
+  return Object.entries(sec.subgroups).map(([key, m]) => ({ key, label: m.label, weight: m.weight }));
+}
+
+export function getSubgroupWeight(key: string, sector: Sector = DEFAULT_SECTOR): number {
+  return snapshot.sectors[sector]?.subgroups[key]?.weight ?? 0;
+}
+
+export function listAvailableMonths(sector: Sector = DEFAULT_SECTOR): MonthKey[] {
+  const sec = snapshot.sectors[sector];
+  if (!sec) return [];
+  const months = new Set<string>();
+  for (const series of Object.values(sec.indices)) {
+    for (const m of Object.keys(series)) months.add(m);
+  }
+  return Array.from(months).sort() as MonthKey[];
 }

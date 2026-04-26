@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { USER_CATEGORIES } from "@/lib/cpi/categories";
 import { getSnapshot } from "@/lib/cpi/snapshot";
 import Calculator from "@/components/Calculator";
@@ -55,6 +56,14 @@ export default function Page() {
           {formatMonth(snapshot.as_of_month)}.
         </p>
         <p className="mt-1 italic">{snapshot.provenance_note}</p>
+        <p className="mt-2">
+          <Link
+            href="/methodology"
+            className="font-medium text-ink-600 underline hover:text-ink-900"
+          >
+            Read the full methodology →
+          </Link>
+        </p>
       </footer>
     </main>
   );

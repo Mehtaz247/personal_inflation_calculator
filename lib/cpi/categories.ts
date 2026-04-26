@@ -1,26 +1,18 @@
 import type { SubgroupKey } from "./types";
+import { SUBGROUP_SPECS } from "./transform";
 
-/**
- * User-facing buckets → official CPI subgroups.
- *
- * Every mapping assumption for this app lives in this file. If MoSPI adds or
- * renames subgroups, changing this table and the snapshot JSON is enough.
- *
- * A user bucket maps to one or more subgroups. When a bucket spans multiple
- * subgroups, the user's rupee spending is split across them in proportion to
- * the supplied split weights (which must sum to 1). Split weights default to
- * official subgroup weights when not supplied.
- */
 export type UserCategoryKey =
   | "food"
+  | "eating_out"
   | "housing"
-  | "fuel_utilities"
   | "transport"
+  | "communication"
   | "healthcare"
   | "education"
   | "clothing"
   | "household_personal"
-  | "miscellaneous";
+  | "entertainment"
+  | "tobacco_alcohol";
 
 export interface UserCategory {
   key: UserCategoryKey;
@@ -29,42 +21,55 @@ export interface UserCategory {
   subgroups: Array<{ subgroup: SubgroupKey; split: number }>;
 }
 
+const W = Object.fromEntries(SUBGROUP_SPECS.map((s) => [s.key, s.weight])) as Record<SubgroupKey, number>;
+
+function normalizeSplit(parts: Array<{ subgroup: SubgroupKey; split: number }>) {
+  const total = parts.reduce((s, p) => s + p.split, 0);
+  return parts.map((p) => ({ subgroup: p.subgroup, split: p.split / total }));
+}
+
 export const USER_CATEGORIES: UserCategory[] = [
   {
     key: "food",
     label: "Food & groceries",
-    description: "Groceries, vegetables, dairy, eating out, beverages",
+    description: "Groceries, vegetables, dairy, beverages cooked at home",
     subgroups: [{ subgroup: "food_and_beverages", split: 1 }],
   },
   {
-    key: "housing",
-    label: "Housing / rent",
-    description: "Rent or imputed housing cost",
-    subgroups: [{ subgroup: "housing", split: 1 }],
+    key: "eating_out",
+    label: "Restaurants & takeout",
+    description: "Restaurants, cafes, hotels, food delivery, accommodation",
+    subgroups: [{ subgroup: "restaurants_accommodation", split: 1 }],
   },
   {
-    key: "fuel_utilities",
-    label: "Fuel & utilities",
-    description: "Electricity, cooking gas, water",
-    subgroups: [{ subgroup: "fuel_and_light", split: 1 }],
+    key: "housing",
+    label: "Housing & utilities",
+    description: "Rent (incl. imputed rent if you own), water, electricity, cooking gas — do not include vehicle fuel",
+    subgroups: [{ subgroup: "housing_utilities", split: 1 }],
   },
   {
     key: "transport",
-    label: "Transport & communication",
-    description: "Fuel for vehicles, public transport, phone, internet",
-    subgroups: [{ subgroup: "transport_and_communication", split: 1 }],
+    label: "Transport",
+    description: "Vehicle fuel (petrol/diesel), public transport, taxi, vehicle upkeep",
+    subgroups: [{ subgroup: "transport", split: 1 }],
+  },
+  {
+    key: "communication",
+    label: "Phone & internet",
+    description: "Mobile, broadband, postal — information & communication services",
+    subgroups: [{ subgroup: "information_communication", split: 1 }],
   },
   {
     key: "healthcare",
     label: "Healthcare",
-    description: "Medicines, doctor fees, insurance premiums",
+    description: "Medicines, doctor fees, hospitals, insurance premiums",
     subgroups: [{ subgroup: "health", split: 1 }],
   },
   {
     key: "education",
     label: "Education",
     description: "School / college fees, books, tuitions",
-    subgroups: [{ subgroup: "education", split: 1 }],
+    subgroups: [{ subgroup: "education_services", split: 1 }],
   },
   {
     key: "clothing",
@@ -75,21 +80,23 @@ export const USER_CATEGORIES: UserCategory[] = [
   {
     key: "household_personal",
     label: "Household & personal care",
-    description: "Household goods, toiletries, grooming",
-    subgroups: [
-      // Split roughly in the ratio of official subgroup weights.
-      { subgroup: "household_goods_and_services", split: 0.5 },
-      { subgroup: "personal_care_and_effects", split: 0.5 },
-    ],
+    description: "Furnishings, household goods, toiletries, grooming, personal-care services",
+    subgroups: normalizeSplit([
+      { subgroup: "furnishings_household", split: W.furnishings_household },
+      { subgroup: "personal_care_misc",    split: W.personal_care_misc },
+    ]),
   },
   {
-    key: "miscellaneous",
-    label: "Miscellaneous",
-    description: "Recreation, tobacco, other discretionary",
-    subgroups: [
-      { subgroup: "recreation_and_amusement", split: 0.5 },
-      { subgroup: "pan_tobacco_and_intoxicants", split: 0.5 },
-    ],
+    key: "entertainment",
+    label: "Entertainment & recreation",
+    description: "Movies, OTT, sports, hobbies, books, cultural events",
+    subgroups: [{ subgroup: "recreation_culture", split: 1 }],
+  },
+  {
+    key: "tobacco_alcohol",
+    label: "Tobacco / alcohol",
+    description: "Paan, tobacco, intoxicants",
+    subgroups: [{ subgroup: "pan_tobacco_and_intoxicants", split: 1 }],
   },
 ];
 

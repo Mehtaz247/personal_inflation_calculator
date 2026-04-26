@@ -1,8 +1,16 @@
 export type MonthKey = `${number}-${string}`;
 
+export type Sector = "combined" | "urban" | "rural";
+
 export interface CpiSubgroupMeta {
   label: string;
   weight: number;
+  code?: string;
+}
+
+export interface CpiSectorData {
+  subgroups: Record<string, CpiSubgroupMeta>;
+  indices: Record<string, Record<MonthKey, number>>;
 }
 
 export interface CpiSnapshot {
@@ -15,19 +23,20 @@ export interface CpiSnapshot {
   frequency: "monthly";
   currency_unit: string;
   provenance_note: string;
-  subgroups: Record<string, CpiSubgroupMeta>;
-  indices: Record<string, Record<MonthKey, number>>;
+  official_headline?: Partial<Record<Sector, number>>;
+  sectors: Record<Sector, CpiSectorData>;
 }
 
 export type SubgroupKey =
   | "food_and_beverages"
   | "pan_tobacco_and_intoxicants"
   | "clothing_and_footwear"
-  | "housing"
-  | "fuel_and_light"
-  | "household_goods_and_services"
+  | "housing_utilities"
+  | "furnishings_household"
   | "health"
-  | "transport_and_communication"
-  | "recreation_and_amusement"
-  | "education"
-  | "personal_care_and_effects";
+  | "transport"
+  | "information_communication"
+  | "recreation_culture"
+  | "education_services"
+  | "restaurants_accommodation"
+  | "personal_care_misc";

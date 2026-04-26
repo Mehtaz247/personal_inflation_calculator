@@ -1,29 +1,47 @@
-/**
- * Fetcher for the MoSPI eSankhyiki CPI API.
- *
- * Endpoint pattern (from https://esankhyiki.mospi.gov.in/macroindicators?product=cpi&tab=api):
- *   GET https://api.mospi.gov.in/api/cpi/getCPIData
- *     ?base_year=2024&year=YYYY&month_code=M&limit=N
- *
- * The exact response field names are not documented from outside the portal,
- * so this module:
- *   1. Accepts the response as `unknown` and exposes the raw rows for
- *      inspection (--log-raw mode in the orchestrator).
- *   2. Lets the transform layer pick out the fields it needs by best-effort
- *      key matching, with loud failure if expected fields are missing.
- *
- * Authentication: optional. If MOSPI_API_KEY is set, it's sent as both
- * `api-key` header and `apikey` query param (covers common gateway styles).
- */
+import https from "node:https";
+import crypto from "node:crypto";
+import { URL } from "node:url";
 
 const BASE_URL = "https://api.mospi.gov.in/api/cpi/getCPIData";
+const LOGIN_URL = "https://api.mospi.gov.in/api/users/login";
+
+const legacyAgent = new https.Agent({
+  secureOptions: crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT,
+});
+
+interface RequestOptions { method?: "GET" | "POST"; headers?: Record<string, string>; body?: string }
+
+function httpRequest(url: string, opts: RequestOptions = {}): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const u = new URL(url);
+    const req = https.request(
+      {
+        method: opts.method ?? "GET",
+        host: u.hostname,
+        port: u.port || 443,
+        path: u.pathname + u.search,
+        headers: opts.headers ?? {},
+        agent: legacyAgent,
+      },
+      (res) => {
+        let body = "";
+        res.setEncoding("utf8");
+        res.on("data", (c) => (body += c));
+        res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+      },
+    );
+    req.on("error", reject);
+    if (opts.body) req.write(opts.body);
+    req.end();
+  });
+}
 
 export interface CpiApiQuery {
   base_year: number;
   year: number;
-  month_code: number; // 1..12
+  month_code: number;
   limit?: number;
-  sector?: string;    // e.g. "Combined" — only used if API supports it
+  sector?: string;
 }
 
 export interface CpiApiResponse {
@@ -32,37 +50,69 @@ export interface CpiApiResponse {
   url: string;
 }
 
-export async function fetchCpiMonth(query: CpiApiQuery, opts?: { apiKey?: string; signal?: AbortSignal }): Promise<CpiApiResponse> {
+let cachedToken: string | null = null;
+
+async function loginIfPossible(): Promise<string | null> {
+  if (cachedToken) return cachedToken;
+  const username = process.env.MOSPI_USERNAME;
+  const password = process.env.MOSPI_PASSWORD;
+  if (!username || !password) return null;
+  const res = await httpRequest(LOGIN_URL, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    body: JSON.stringify({ username, password }),
+  });
+  if (res.status < 200 || res.status >= 300) {
+    throw new Error(`MoSPI login failed ${res.status} — ${res.body.slice(0, 200)}`);
+  }
+  let data: unknown;
+  try { data = JSON.parse(res.body); } catch { throw new Error("MoSPI login: invalid JSON"); }
+  const token = extractToken(data);
+  if (!token) throw new Error("MoSPI login returned no token");
+  cachedToken = token;
+  return token;
+}
+
+function extractToken(payload: unknown): string | null {
+  if (!payload || typeof payload !== "object") return null;
+  const obj = payload as Record<string, unknown>;
+  for (const key of ["token", "access_token", "accessToken", "jwt", "authToken"]) {
+    const v = obj[key];
+    if (typeof v === "string" && v.length > 0) return v;
+  }
+  if (obj.data && typeof obj.data === "object") return extractToken(obj.data);
+  return null;
+}
+
+export async function fetchCpiMonth(
+  query: CpiApiQuery,
+  _opts?: { signal?: AbortSignal },
+): Promise<CpiApiResponse> {
+  const limit = Math.min(Math.max(query.limit ?? 100, 10), 100);
   const params = new URLSearchParams({
     base_year: String(query.base_year),
     year: String(query.year),
     month_code: String(query.month_code),
-    limit: String(query.limit ?? 200),
+    limit: String(limit),
   });
   if (query.sector) params.set("sector", query.sector);
 
-  const apiKey = opts?.apiKey ?? process.env.MOSPI_API_KEY;
-  if (apiKey) params.set("apikey", apiKey);
-
   const url = `${BASE_URL}?${params.toString()}`;
   const headers: Record<string, string> = { Accept: "application/json" };
-  if (apiKey) headers["api-key"] = apiKey;
 
-  const res = await fetch(url, { headers, signal: opts?.signal });
-  if (!res.ok) {
-    const body = await res.text().catch(() => "");
-    throw new Error(`MoSPI CPI API ${res.status} ${res.statusText} — ${body.slice(0, 200)}`);
+  const token = await loginIfPossible();
+  if (token) headers["Authorization"] = token;
+
+  const res = await httpRequest(url, { headers });
+  if (res.status < 200 || res.status >= 300) {
+    throw new Error(`MoSPI CPI API ${res.status} — ${res.body.slice(0, 200)}`);
   }
-  const raw: unknown = await res.json();
+  let raw: unknown;
+  try { raw = JSON.parse(res.body); } catch { throw new Error("MoSPI CPI API: invalid JSON"); }
   const rows = extractRows(raw);
   return { raw, rows, url };
 }
 
-/**
- * Pull rows from the response regardless of whether they're nested under
- * `data`, `records`, `result`, or returned as a top-level array. Failing
- * loudly is better than silently parsing zero rows.
- */
 function extractRows(payload: unknown): Record<string, unknown>[] {
   if (Array.isArray(payload)) return payload as Record<string, unknown>[];
   if (payload && typeof payload === "object") {
