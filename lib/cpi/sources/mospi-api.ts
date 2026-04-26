@@ -101,6 +101,7 @@ export async function fetchCpiMonth(
   if (query.sector) params.set("sector_code", query.sector);
   if (query.state_code != null) params.set("state_code", String(query.state_code));
   if (query.page != null) params.set("page", String(query.page));
+  if (query.division_code != null) params.set("division_code", query.division_code);
 
   const url = `${BASE_URL}?${params.toString()}`;
   const headers: Record<string, string> = { Accept: "application/json" };
