@@ -43,6 +43,19 @@ export function subgroupYoY(
   return current / prior - 1;
 }
 
+export function getSubgroupIndices(
+  subgroup: string,
+  month: MonthKey = snapshot.as_of_month,
+  sector: Sector = DEFAULT_SECTOR,
+): { current: number; prior: number } | null {
+  const series = snapshot.sectors[sector]?.indices[subgroup];
+  if (!series) return null;
+  const current = series[month];
+  const prior = series[shiftYear(month, -1)];
+  if (current == null || prior == null || prior === 0) return null;
+  return { current, prior };
+}
+
 export function headlineYoY(
   month: MonthKey = snapshot.as_of_month,
   sector: Sector = DEFAULT_SECTOR,

@@ -98,9 +98,10 @@ export async function generateExplanation(result: ComputeResult): Promise<{
   const systemPrompt =
     "You write a 3-4 sentence explanation of an Indian household's personal inflation result. " +
     "Strict rules: use only the numbers in the JSON facts; do not invent figures or distort the gap sign; " +
-    "do not give financial advice; no emojis; no markdown. Mention at least one specific COICOP division name " +
+    "no emojis; no markdown. Mention at least one specific COICOP division name " +
     "and a specific weight comparison (e.g. 'you spend 25% on Food vs the national 40%'). Refer to the as-of " +
-    "month in plain English (e.g. 'March 2026'). Tone: concise, neutral, credible.";
+    "month in plain English (e.g. 'March 2026'). IMPORTANT: Conclude with ONE actionable, insightful " +
+    "piece of financial advice based on their highest positive gap contributor to help them reduce their personal inflation.";
 
   const client = new GoogleGenAI({ apiKey });
   const response = await client.models.generateContent({

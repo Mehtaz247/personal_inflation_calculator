@@ -12,16 +12,16 @@ export default function MethodologyPage() {
     <main className="mx-auto max-w-3xl px-5 py-10 md:py-14">
       <Link
         href="/"
-        className="mb-6 inline-flex items-center gap-1 text-xs font-medium text-ink-500 hover:text-ink-800"
+        className="mb-6 inline-flex items-center gap-1 text-xs font-medium text-zinc-400 hover:text-white transition-colors"
       >
         ← Back to calculator
       </Link>
 
-      <h1 className="mb-6 text-3xl font-semibold tracking-tight text-ink-900 md:text-4xl">
+      <h1 className="mb-6 text-3xl font-semibold tracking-tight text-white md:text-4xl">
         Methodology
       </h1>
 
-      <div className="prose prose-sm max-w-none text-ink-700 [&_h2]:mt-8 [&_h2]:mb-3 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:text-ink-900 [&_h3]:mt-5 [&_h3]:mb-2 [&_h3]:text-base [&_h3]:font-semibold [&_h3]:text-ink-800 [&_p]:mb-3 [&_p]:leading-relaxed [&_ul]:mb-3 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:mb-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:mb-1 [&_code]:rounded [&_code]:bg-ink-50 [&_code]:px-1 [&_code]:text-sm [&_code]:text-ink-800">
+      <div className="prose prose-sm max-w-none text-zinc-300 [&_h2]:mt-8 [&_h2]:mb-3 [&_h2]:text-lg [&_h2]:font-semibold [&_h2]:text-zinc-100 [&_h3]:mt-5 [&_h3]:mb-2 [&_h3]:text-base [&_h3]:font-semibold [&_h3]:text-zinc-200 [&_p]:mb-3 [&_p]:leading-relaxed [&_ul]:mb-3 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:mb-3 [&_ol]:list-decimal [&_ol]:pl-5 [&_li]:mb-1 [&_code]:rounded [&_code]:bg-zinc-800 [&_code]:px-1.5 [&_code]:py-0.5 [&_code]:text-sm [&_code]:text-zinc-200 [&_strong]:text-zinc-100 [&_em]:text-zinc-200">
         <h2>What this calculator does</h2>
         <p>
           India&apos;s Consumer Price Index (CPI) measures the average change
@@ -185,7 +185,7 @@ export default function MethodologyPage() {
               href="https://www.mospi.gov.in"
               target="_blank"
               rel="noopener noreferrer"
-              className="text-ink-600 underline hover:text-ink-900"
+              className="text-emerald-400 underline hover:text-emerald-300"
             >
               mospi.gov.in
             </a>
@@ -201,10 +201,10 @@ export default function MethodologyPage() {
         </ul>
       </div>
 
-      <div className="mt-10 border-t border-ink-200 pt-5">
+      <div className="mt-10 border-t border-zinc-800 pt-5">
         <Link
           href="/"
-          className="text-sm font-medium text-ink-600 hover:text-ink-900"
+          className="text-sm font-medium text-zinc-400 hover:text-white transition-colors"
         >
           ← Back to calculator
         </Link>

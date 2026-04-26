@@ -1,51 +1,12 @@
 import { NextResponse } from "next/server";
-import { compute, computeMonthlySeries, type SpendingInput } from "@/lib/inflation/engine";
 import { computeForState } from "@/lib/inflation/state-engine";
+import { compute, computeMonthlySeries, type SpendingInput } from "@/lib/inflation/engine";
 import type { Sector } from "@/lib/cpi/types";
 
 export const runtime = "nodejs";
+export const maxDuration = 15; // state fetch can be slow (2 API calls)
 
 const SECTORS: Sector[] = ["combined", "urban", "rural"];
-
-const STATE_CODES: Record<string, number> = {
-  "All India": 1,
-  "Andaman And Nicobar Islands": 2,
-  "Andhra Pradesh": 3,
-  "Arunachal Pradesh": 4,
-  "Assam": 5,
-  "Bihar": 6,
-  "Chandigarh": 7,
-  "Chhattisgarh": 8,
-  "Goa": 9,
-  "Gujarat": 10,
-  "Haryana": 11,
-  "Himachal Pradesh": 12,
-  "Jammu And Kashmir": 13,
-  "Jharkhand": 14,
-  "Karnataka": 15,
-  "Kerala": 16,
-  "Ladakh": 17,
-  "Lakshadweep": 18,
-  "Madhya Pradesh": 19,
-  "Maharashtra": 20,
-  "Manipur": 21,
-  "Meghalaya": 22,
-  "Mizoram": 23,
-  "Nagaland": 24,
-  "NCT of Delhi": 25,
-  "Odisha": 26,
-  "Puducherry": 27,
-  "Punjab": 28,
-  "Rajasthan": 29,
-  "Sikkim": 30,
-  "Tamil Nadu": 31,
-  "Telangana": 32,
-  "The Dadra And Nagar Haveli And Daman And Diu": 33,
-  "Tripura": 34,
-  "Uttar Pradesh": 35,
-  "Uttarakhand": 36,
-  "West Bengal": 37,
-};
 
 export async function POST(req: Request) {
   let body: unknown;
@@ -54,30 +15,35 @@ export async function POST(req: Request) {
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
-
-  const b = (body ?? {}) as { spending?: SpendingInput; sector?: string; state?: string };
+  const b = (body ?? {}) as { spending?: SpendingInput; sector?: string; state_code?: number };
   const spending = b.spending ?? {};
-  if (typeof spending !== "object" || spending === null) {
-    return NextResponse.json({ error: "`spending` must be an object" }, { status: 400 });
-  }
   const sector: Sector = (SECTORS as string[]).includes(b.sector ?? "")
     ? (b.sector as Sector)
     : "combined";
 
-  const stateName = b.state ?? "All India";
-  const stateCode = STATE_CODES[stateName];
-
-  if (stateName !== "All India" && stateCode && stateCode !== 1) {
-    try {
-      const result = await computeForState(spending, stateCode, sector);
-      return NextResponse.json({ ...result, state: stateName });
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : "State data fetch failed";
-      return NextResponse.json({ error: msg }, { status: 502 });
-    }
+  // All India → use local computation
+  if (b.state_code == null || b.state_code === 0) {
+    const result = compute(spending, undefined, sector);
+    const series = computeMonthlySeries(spending, 24, sector);
+    return NextResponse.json({ ...result, monthly_series: series });
   }
 
-  const result = compute(spending, undefined, sector);
-  const series = computeMonthlySeries(spending, 24, sector);
-  return NextResponse.json({ ...result, monthly_series: series, state: "All India" });
+  // State-level → call MoSPI API
+  try {
+    const result = await computeForState(spending, b.state_code, sector);
+    // Monthly series not available for state-level (would need 24 API calls),
+    // fall back to All India series as reference
+    const series = computeMonthlySeries(spending, 24, sector);
+    return NextResponse.json({ ...result, monthly_series: series });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    // Fall back to All India if state API fails
+    const fallback = compute(spending, undefined, sector);
+    const series = computeMonthlySeries(spending, 24, sector);
+    return NextResponse.json({
+      ...fallback,
+      monthly_series: series,
+      state_error: `Could not fetch ${sector} CPI for state ${b.state_code}: ${message}. Showing All India data.`,
+    });
+  }
 }

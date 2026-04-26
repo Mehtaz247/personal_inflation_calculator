@@ -3,6 +3,7 @@ import { getLatestMonth } from "@/lib/cpi/snapshot";
 import { fetchStatePairForYoY } from "@/lib/cpi/state-fetch";
 import type { MonthKey, Sector } from "@/lib/cpi/types";
 import type { SpendingInput, ComputeResult, CategoryResult, GapRow } from "./engine";
+import stateWeightsJson from "@/data/cpi/state_weights.json";
 
 export async function computeForState(
   spending: SpendingInput,
@@ -11,18 +12,6 @@ export async function computeForState(
 ): Promise<ComputeResult> {
   const asOf = getLatestMonth();
   const { current, prior } = await fetchStatePairForYoY(stateCode, sector, asOf);
-
-  const divisionYoY: Record<string, number> = {};
-  for (const div of current.divisions) {
-    if (div.yoy != null) {
-      divisionYoY[div.key] = div.yoy;
-    } else {
-      const priorDiv = prior.divisions.find((p) => p.key === div.key);
-      if (priorDiv && priorDiv.index > 0) {
-        divisionYoY[div.key] = div.index / priorDiv.index - 1;
-      }
-    }
-  }
 
   const entries = USER_CATEGORIES.map((c) => {
     const raw = spending[c.key];
@@ -35,16 +24,26 @@ export async function computeForState(
 
   const categories: CategoryResult[] = entries.map(({ cat, spend }) => {
     const weight = total > 0 ? spend / total : 0;
-    let inflation = 0;
+    
+    let curIndexTotal = 0;
+    let priorIndexTotal = 0;
     let found = false;
     for (const { subgroup, split } of cat.subgroups) {
-      const yoy = divisionYoY[subgroup];
-      if (yoy != null) {
-        inflation += split * yoy;
+      const curDiv = current.divisions.find((d) => d.key === subgroup);
+      const priorDiv = prior.divisions.find((d) => d.key === subgroup);
+      if (curDiv?.index != null && priorDiv?.index != null && priorDiv.index > 0) {
+        curIndexTotal += split * curDiv.index;
+        priorIndexTotal += split * priorDiv.index;
         found = true;
       }
     }
-    if (!found) missing.push(cat.key);
+    
+    if (!found || priorIndexTotal === 0) {
+      missing.push(cat.key);
+      return { key: cat.key, label: cat.label, spend, weight, inflation: 0, contribution: 0 };
+    }
+    
+    const inflation = (curIndexTotal / priorIndexTotal) - 1;
     return { key: cat.key, label: cat.label, spend, weight, inflation, contribution: weight * inflation };
   });
 
@@ -57,27 +56,28 @@ export async function computeForState(
     .sort((a, b) => Math.abs(b.contribution) - Math.abs(a.contribution))
     .slice(0, 3);
 
-  const nationalWeights: Record<string, number> = {};
-  for (const spec of (await import("@/lib/cpi/transform")).SUBGROUP_SPECS) {
-    nationalWeights[spec.key] = spec.weight;
-  }
+  const { SUBGROUP_SPECS } = await import("@/lib/cpi/transform");
+  const stateWeights = (stateWeightsJson as Record<string, Record<string, Record<string, number>>>)[String(stateCode)]?.[sector] ?? {};
 
   const gap_decomposition: GapRow[] = entries.map(({ cat, spend }) => {
     const your_weight = total > 0 ? spend / total : 0;
-    let national_weight = 0;
+    let state_weight = 0;
     for (const { subgroup } of cat.subgroups) {
-      national_weight += nationalWeights[subgroup] ?? 0;
+      const spec = SUBGROUP_SPECS.find(s => s.key === subgroup);
+      if (spec) {
+        state_weight += stateWeights[spec.code] ?? 0;
+      }
     }
-    let yoy = 0;
-    for (const { subgroup, split } of cat.subgroups) {
-      yoy += split * (divisionYoY[subgroup] ?? 0);
-    }
-    const weight_diff = your_weight - national_weight;
+    
+    const categoryResult = categories.find(c => c.key === cat.key);
+    const yoy = categoryResult?.inflation ?? 0;
+    
+    const weight_diff = your_weight - state_weight;
     return {
       key: cat.key,
       label: cat.label,
       your_weight,
-      national_weight,
+      national_weight: state_weight,
       weight_diff,
       category_yoy: yoy,
       gap_contribution: weight_diff * yoy,

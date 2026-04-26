@@ -1,7 +1,8 @@
 "use client";
 
-import { useState, useTransition } from "react";
-import type { ComputeResult } from "@/lib/inflation/engine";
+import { useState, useMemo, useTransition, useEffect, useCallback } from "react";
+import { Sparkles, Loader2, ArrowRight, AlertTriangle, User, Briefcase, GraduationCap, Heart } from "lucide-react";
+import { compute, computeMonthlySeries } from "@/lib/inflation/engine";
 import type { UserCategoryKey } from "@/lib/cpi/categories";
 import type { Sector } from "@/lib/cpi/types";
 import Results from "./Results";
@@ -12,107 +13,190 @@ interface CategoryDescriptor {
   description: string;
 }
 
-interface MonthlyPoint { month: string; personal: number; official: number }
-type Compute = ComputeResult & { monthly_series?: MonthlyPoint[] };
-
-const PRESETS: Record<string, Partial<Record<UserCategoryKey, number>>> = {
-  "Urban renter": {
-    food: 15000, eating_out: 4000, housing: 27500,
-    transport: 6000, communication: 1200,
-    healthcare: 2000, education: 3000, clothing: 2000,
-    household_personal: 3000, entertainment: 1500, tobacco_alcohol: 0,
-  },
-  "Family with kids": {
-    food: 22000, eating_out: 3000, housing: 21500,
-    transport: 8000, communication: 1500,
-    healthcare: 4000, education: 12000, clothing: 3000,
-    household_personal: 4000, entertainment: 1500, tobacco_alcohol: 0,
-  },
-  "Retired household": {
-    food: 12000, eating_out: 1000, housing: 10500,
-    transport: 2500, communication: 800,
-    healthcare: 10000, education: 0, clothing: 1500,
-    household_personal: 2500, entertainment: 1000, tobacco_alcohol: 0,
-  },
+/* ── State name → MoSPI API state_code ── */
+const STATE_MAP: Record<string, number> = {
+  "All India": 0,
+  "Andaman And Nicobar Islands": 1,
+  "Andhra Pradesh": 2,
+  "Arunachal Pradesh": 3,
+  "Assam": 5,
+  "Bihar": 6,
+  "Chandigarh": 4,
+  "Chhattisgarh": 33,
+  "Goa": 7,
+  "Gujarat": 8,
+  "Haryana": 9,
+  "Himachal Pradesh": 10,
+  "Jammu And Kashmir": 11,
+  "Jharkhand": 34,
+  "Karnataka": 15,
+  "Kerala": 16,
+  "Ladakh": 37,
+  "Lakshadweep": 12,
+  "Madhya Pradesh": 17,
+  "Maharashtra": 18,
+  "Manipur": 19,
+  "Meghalaya": 20,
+  "Mizoram": 21,
+  "Nagaland": 22,
+  "NCT of Delhi": 23,
+  "Odisha": 24,
+  "Puducherry": 25,
+  "Punjab": 27,
+  "Rajasthan": 28,
+  "Sikkim": 29,
+  "Tamil Nadu": 30,
+  "Telangana": 36,
+  "The Dadra And Nagar Haveli And Daman And Diu": 13,
+  "Tripura": 31,
+  "Uttar Pradesh": 32,
+  "Uttarakhand": 35,
+  "West Bengal": 14,
 };
 
-const STATES = [
-  "All India",
-  "Andaman And Nicobar Islands", "Andhra Pradesh", "Arunachal Pradesh", "Assam",
-  "Bihar", "Chandigarh", "Chhattisgarh",
-  "Goa", "Gujarat",
-  "Haryana", "Himachal Pradesh",
-  "Jammu And Kashmir", "Jharkhand",
-  "Karnataka", "Kerala",
-  "Ladakh", "Lakshadweep",
-  "Madhya Pradesh", "Maharashtra", "Manipur", "Meghalaya", "Mizoram",
-  "Nagaland", "NCT of Delhi",
-  "Odisha",
-  "Puducherry", "Punjab",
-  "Rajasthan",
-  "Sikkim",
-  "Tamil Nadu", "Telangana", "The Dadra And Nagar Haveli And Daman And Diu", "Tripura",
-  "Uttar Pradesh", "Uttarakhand",
-  "West Bengal",
+const STATES = Object.keys(STATE_MAP);
+
+/* ── Preset spending profiles ── */
+interface Preset {
+  label: string;
+  icon: React.ReactNode;
+  description: string;
+  spending: Partial<Record<UserCategoryKey, number>>;
+}
+
+const PRESETS: Preset[] = [
+  {
+    label: "Urban Professional",
+    icon: <Briefcase className="h-4 w-4" />,
+    description: "₹65k/mo · rent-heavy, eats out often",
+    spending: { food: 8000, eating_out: 6000, housing: 25000, transport: 5000, communication: 1500, healthcare: 3000, education: 0, clothing: 3000, household_personal: 4000, entertainment: 5000, tobacco_alcohol: 0 },
+  },
+  {
+    label: "Middle-Class Family",
+    icon: <Heart className="h-4 w-4" />,
+    description: "₹45k/mo · kids in school, home-cooking",
+    spending: { food: 12000, eating_out: 2000, housing: 10000, transport: 4000, communication: 1000, healthcare: 3000, education: 8000, clothing: 2000, household_personal: 2000, entertainment: 1000, tobacco_alcohol: 0 },
+  },
+  {
+    label: "Student",
+    icon: <GraduationCap className="h-4 w-4" />,
+    description: "₹18k/mo · hostel, food, transport",
+    spending: { food: 4000, eating_out: 3000, housing: 5000, transport: 2000, communication: 500, healthcare: 500, education: 1500, clothing: 500, household_personal: 500, entertainment: 500, tobacco_alcohol: 0 },
+  },
+  {
+    label: "Retired Couple",
+    icon: <User className="h-4 w-4" />,
+    description: "₹35k/mo · healthcare-heavy, own home",
+    spending: { food: 10000, eating_out: 1000, housing: 5000, transport: 2000, communication: 800, healthcare: 10000, education: 0, clothing: 1500, household_personal: 2000, entertainment: 1500, tobacco_alcohol: 1200 },
+  },
 ];
 
 export default function Calculator({ categories }: { categories: CategoryDescriptor[] }) {
   const [spending, setSpending] = useState<Partial<Record<UserCategoryKey, number>>>({});
   const [sector, setSector] = useState<Sector>("combined");
   const [state, setState] = useState("All India");
-  const [result, setResult] = useState<Compute | null>(null);
-  const [explanation, setExplanation] = useState<{ text: string; source: string } | null>(null);
-  const [explainLoading, setExplainLoading] = useState(false);
-  const [isPending, startTransition] = useTransition();
+  const [aiText, setAiText] = useState("");
+  const [parseError, setParseError] = useState<string | null>(null);
+  const [isParsing, startParsingTransition] = useTransition();
+
+  /* ── State-level async result ── */
+  const [stateResult, setStateResult] = useState<any>(null);
+  const [stateLoading, setStateLoading] = useState(false);
+
+  /* ── All-India result (client-side, instant) ── */
+  const allIndiaResult = useMemo(() => {
+    const total = Object.values(spending).reduce((s, v) => s + (v || 0), 0);
+    if (total === 0) return null;
+    const res = compute(spending, undefined, sector);
+    const series = computeMonthlySeries(spending, 24, sector);
+    return { ...res, monthly_series: series, state: "All India", spending_raw: spending };
+  }, [spending, sector]);
+
+  /* ── Fetch state-level data when state != All India ── */
+  const fetchStateResult = useCallback(async () => {
+    const stateCode = STATE_MAP[state];
+    if (stateCode === 0 || stateCode === undefined) {
+      setStateResult(null);
+      return;
+    }
+    const total = Object.values(spending).reduce((s, v) => s + (v || 0), 0);
+    if (total === 0) {
+      setStateResult(null);
+      return;
+    }
+    setStateLoading(true);
+    try {
+      const res = await fetch("/api/compute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ spending, sector, state_code: stateCode }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setStateResult({ ...data, state, spending_raw: spending });
+      } else {
+        // Fallback to All India if state fetch fails
+        setStateResult(null);
+      }
+    } catch {
+      setStateResult(null);
+    } finally {
+      setStateLoading(false);
+    }
+  }, [spending, sector, state]);
+
+  useEffect(() => {
+    const stateCode = STATE_MAP[state];
+    if (stateCode === 0 || stateCode === undefined) {
+      setStateResult(null);
+      return;
+    }
+    const total = Object.values(spending).reduce((s, v) => s + (v || 0), 0);
+    if (total === 0) return;
+    // Debounce state fetch
+    const timer = setTimeout(fetchStateResult, 400);
+    return () => clearTimeout(timer);
+  }, [fetchStateResult, state, spending, sector]);
+
+  /* ── Choose which result to display ── */
+  const isStateSelected = STATE_MAP[state] !== 0;
+  const result = isStateSelected ? (stateResult ?? allIndiaResult) : allIndiaResult;
+
+  async function handleAiParse() {
+    if (!aiText.trim()) return;
+    setParseError(null);
+    startParsingTransition(async () => {
+      try {
+        const res = await fetch("/api/parse", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: aiText }),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.error) {
+            setParseError(data.error);
+          } else {
+            setSpending(data);
+            setAiText("");
+          }
+        } else {
+          const err = await res.json().catch(() => ({ error: "Failed to parse your input. Try being more specific about amounts." }));
+          setParseError(err.error || "Something went wrong. Please try again.");
+        }
+      } catch {
+        setParseError("Network error. Please check your connection and try again.");
+      }
+    });
+  }
 
   function setField(key: UserCategoryKey, value: string) {
     const n = value === "" ? undefined : Number(value);
     setSpending((s) => ({ ...s, [key]: Number.isFinite(n as number) ? (n as number) : undefined }));
   }
 
-  function applyPreset(name: string) {
-    const p = PRESETS[name];
-    if (!p) return;
-    setSpending(p);
-    setResult(null);
-    setExplanation(null);
-  }
-
-  function reset() {
-    setSpending({});
-    setResult(null);
-    setExplanation(null);
-  }
-
-  async function calculate() {
-    setExplanation(null);
-    startTransition(async () => {
-      const res = await fetch("/api/compute", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ spending, sector, state }),
-      });
-      if (!res.ok) return;
-      const data = (await res.json()) as Compute;
-      setResult(data);
-    });
-  }
-
-  async function explain() {
-    if (!result) return;
-    setExplainLoading(true);
-    try {
-      const res = await fetch("/api/explain", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ spending, sector, state }),
-      });
-      if (!res.ok) return;
-      const data = (await res.json()) as { text: string; source: string };
-      setExplanation(data);
-    } finally {
-      setExplainLoading(false);
-    }
+  function applyPreset(p: Preset) {
+    setSpending(p.spending);
   }
 
   const total = Object.values(spending).reduce<number>(
@@ -121,117 +205,147 @@ export default function Calculator({ categories }: { categories: CategoryDescrip
   );
 
   return (
-    <div className="grid gap-6 md:grid-cols-[1.1fr_1fr]">
-      <section className="rounded-xl border border-ink-200 bg-white p-5 shadow-sm">
-        <div className="mb-4 flex items-center justify-between gap-3">
-          <h2 className="text-base font-semibold text-ink-900">Your monthly spending (₹)</h2>
-          <div className="text-sm text-ink-500">
-            Total: <span className="font-semibold text-ink-800">₹{total.toLocaleString("en-IN")}</span>
+    <div className="grid gap-8 lg:grid-cols-[1fr_1fr] xl:grid-cols-[1.1fr_1fr]">
+      <section className="flex flex-col gap-6">
+        
+        {/* AI Input Box */}
+        <div className="relative overflow-hidden rounded-2xl border border-zinc-800 bg-zinc-900/40 p-1 backdrop-blur-md focus-within:border-emerald-500/50 focus-within:ring-1 focus-within:ring-emerald-500/50 transition-all">
+          <div className="flex flex-col rounded-xl bg-zinc-950 p-4">
+            <label className="mb-2 flex items-center gap-2 text-sm font-medium text-emerald-400">
+              <Sparkles className="h-4 w-4" /> Describe your lifestyle
+            </label>
+            <textarea
+              rows={3}
+              value={aiText}
+              onChange={(e) => { setAiText(e.target.value); setParseError(null); }}
+              placeholder="e.g. I live in Bangalore, pay 30k in rent, spend about 15k on food and ordering out, and maybe 5k on petrol."
+              className="w-full resize-none bg-transparent text-zinc-200 placeholder-zinc-600 outline-none sm:text-lg"
+            />
+            {parseError && (
+              <div className="mt-2 flex items-start gap-2 rounded-lg bg-rose-950/40 border border-rose-800/50 px-3 py-2 text-sm text-rose-300">
+                <AlertTriangle className="h-4 w-4 mt-0.5 flex-shrink-0 text-rose-400" />
+                <span>{parseError}</span>
+              </div>
+            )}
+            <div className="mt-3 flex justify-end">
+              <button
+                type="button"
+                onClick={handleAiParse}
+                disabled={isParsing || !aiText.trim()}
+                className="flex items-center gap-2 rounded-full bg-emerald-500 px-4 py-2 text-sm font-semibold text-zinc-950 transition hover:bg-emerald-400 disabled:opacity-50"
+              >
+                {isParsing ? <Loader2 className="h-4 w-4 animate-spin" /> : <ArrowRight className="h-4 w-4" />}
+                {isParsing ? "Analyzing..." : "Auto-fill"}
+              </button>
+            </div>
           </div>
         </div>
 
-        <div className="mb-4 space-y-3">
-          <div className="flex flex-wrap items-center gap-2">
-            {Object.keys(PRESETS).map((name) => (
+        {/* Quick Presets */}
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-4 backdrop-blur-md">
+          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-zinc-500">Quick Profiles</h3>
+          <div className="grid grid-cols-2 gap-2">
+            {PRESETS.map((p) => (
               <button
-                key={name}
+                key={p.label}
                 type="button"
-                onClick={() => applyPreset(name)}
-                className="rounded-full border border-ink-200 bg-ink-50 px-3 py-1 text-xs font-medium text-ink-700 hover:bg-ink-100"
+                onClick={() => applyPreset(p)}
+                className="flex items-start gap-2.5 rounded-xl border border-zinc-800 bg-zinc-950 p-3 text-left transition-all hover:border-emerald-500/40 hover:bg-zinc-900"
               >
-                {name}
+                <span className="mt-0.5 flex-shrink-0 text-emerald-500">{p.icon}</span>
+                <div>
+                  <div className="text-sm font-medium text-zinc-200">{p.label}</div>
+                  <div className="text-[11px] text-zinc-500">{p.description}</div>
+                </div>
               </button>
             ))}
-            <button
-              type="button"
-              onClick={reset}
-              className="rounded-full border border-ink-200 bg-white px-3 py-1 text-xs font-medium text-ink-600 hover:bg-ink-50"
-            >
-              Reset
-            </button>
+          </div>
+        </div>
+
+        {/* Manual Inputs */}
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6 shadow-2xl backdrop-blur-md">
+          <div className="mb-6 flex items-center justify-between">
+            <h2 className="text-lg font-semibold text-zinc-100">Monthly Spending</h2>
+            <div className="text-sm font-medium text-zinc-400">
+              Total: <span className="text-white">₹{total.toLocaleString("en-IN")}</span>
+            </div>
           </div>
 
-          <div className="flex items-center gap-4">
-            <label className="flex items-center gap-2 text-xs text-ink-600">
-              State
+          <div className="mb-6 flex flex-wrap items-center gap-4">
+            <label className="flex flex-col gap-1.5 text-xs text-zinc-400">
+              State / UT
               <select
                 value={state}
-                onChange={(e) => { setState(e.target.value); setResult(null); setExplanation(null); }}
-                className="rounded border border-ink-200 bg-white px-2 py-1 text-xs text-ink-800"
+                onChange={(e) => setState(e.target.value)}
+                className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-emerald-500"
               >
                 {STATES.map((s) => (
                   <option key={s} value={s}>{s}</option>
                 ))}
               </select>
             </label>
-            <label className="flex items-center gap-2 text-xs text-ink-600">
+            <label className="flex flex-col gap-1.5 text-xs text-zinc-400">
               Sector
               <select
                 value={sector}
-                onChange={(e) => { setSector(e.target.value as Sector); setResult(null); setExplanation(null); }}
-                className="rounded border border-ink-200 bg-white px-2 py-1 text-xs text-ink-800"
+                onChange={(e) => setSector(e.target.value as Sector)}
+                className="rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-sm text-zinc-200 outline-none focus:border-emerald-500"
               >
                 <option value="combined">Combined</option>
                 <option value="urban">Urban</option>
                 <option value="rural">Rural</option>
               </select>
             </label>
+            <button
+              type="button"
+              onClick={() => setSpending({})}
+              className="ml-auto mt-4 rounded-lg border border-zinc-800 bg-zinc-950 px-3 py-2 text-xs font-medium text-zinc-400 hover:text-white"
+            >
+              Reset
+            </button>
           </div>
-        </div>
 
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {categories.map((c) => (
-            <label key={c.key} className="flex flex-col">
-              <span className="text-sm font-medium text-ink-800">{c.label}</span>
-              <span className="mb-1 text-xs text-ink-500">{c.description}</span>
-              <div className="relative">
-                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-ink-400">
-                  ₹
-                </span>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  min={0}
-                  step={100}
-                  value={spending[c.key] ?? ""}
-                  onChange={(e) => setField(c.key, e.target.value)}
-                  placeholder="0"
-                  className="w-full rounded-lg border border-ink-200 bg-white py-2 pl-7 pr-3 text-sm text-ink-900 outline-none ring-0 focus:border-ink-500"
-                />
-              </div>
-            </label>
-          ))}
-        </div>
-
-        <div className="mt-5 flex items-center gap-3">
-          <button
-            type="button"
-            onClick={calculate}
-            disabled={isPending || total === 0}
-            className="rounded-lg bg-ink-900 px-4 py-2 text-sm font-medium text-white hover:bg-ink-800 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {isPending ? "Calculating…" : "Calculate my inflation"}
-          </button>
-          {total === 0 && (
-            <span className="text-xs text-ink-500">Enter at least one category to calculate.</span>
-          )}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            {categories.map((c) => (
+              <label key={c.key} className="flex flex-col group">
+                <span className="text-sm font-medium text-zinc-300 group-hover:text-zinc-100 transition-colors">{c.label}</span>
+                <span className="mb-2 text-xs text-zinc-600 line-clamp-1" title={c.description}>{c.description}</span>
+                <div className="relative">
+                  <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500">
+                    ₹
+                  </span>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min={0}
+                    step={100}
+                    value={spending[c.key] ?? ""}
+                    onChange={(e) => setField(c.key, e.target.value)}
+                    placeholder="0"
+                    className="w-full rounded-xl border border-zinc-800 bg-zinc-950 py-2.5 pl-8 pr-3 text-sm font-medium text-white outline-none ring-0 focus:border-emerald-500 transition-colors"
+                  />
+                </div>
+              </label>
+            ))}
+          </div>
         </div>
       </section>
 
-      <section>
+      <section className="h-full">
+        {stateLoading && (
+          <div className="mb-4 flex items-center gap-2 rounded-xl border border-amber-900/40 bg-amber-950/20 px-4 py-3 text-sm text-amber-300">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Loading {state} CPI data from MoSPI…
+          </div>
+        )}
         {result ? (
-          <Results
-            result={result}
-            explanation={explanation}
-            explainLoading={explainLoading}
-            onExplain={explain}
-          />
+          <Results result={result as any} />
         ) : (
-          <div className="flex h-full min-h-[320px] flex-col items-center justify-center rounded-xl border border-dashed border-ink-200 bg-white p-6 text-center text-sm text-ink-500">
-            <p className="mb-1 font-medium text-ink-700">Results will appear here</p>
-            <p>
-              Try a preset or enter your own spending, then hit{" "}
-              <span className="font-medium">Calculate my inflation</span>.
+          <div className="flex h-full min-h-[400px] flex-col items-center justify-center rounded-2xl border border-dashed border-zinc-800 bg-zinc-900/20 p-8 text-center text-sm text-zinc-500">
+            <Sparkles className="mb-4 h-8 w-8 text-zinc-700" />
+            <p className="mb-2 font-medium text-zinc-300">Awaiting Data</p>
+            <p className="max-w-xs mb-4">
+              Tell us your lifestyle above or pick a quick profile to see your personal inflation immediately.
             </p>
           </div>
         )}

@@ -1,7 +1,7 @@
 import { USER_CATEGORIES, type UserCategoryKey } from "@/lib/cpi/categories";
 import {
   headlineYoY,
-  subgroupYoY,
+  getSubgroupIndices,
   getLatestMonth,
   getSubgroupWeight,
   getOfficialHeadline,
@@ -53,16 +53,18 @@ function bucketInflation(
 ): number | null {
   const cat = USER_CATEGORIES.find((c) => c.key === categoryKey);
   if (!cat) return null;
-  let total = 0;
+  let curIndexTotal = 0;
+  let priorIndexTotal = 0;
   let used = 0;
   for (const { subgroup, split } of cat.subgroups) {
-    const r = subgroupYoY(subgroup, month, sector);
-    if (r == null) continue;
-    total += split * r;
+    const indices = getSubgroupIndices(subgroup, month, sector);
+    if (!indices) continue;
+    curIndexTotal += split * indices.current;
+    priorIndexTotal += split * indices.prior;
     used += split;
   }
-  if (used === 0) return null;
-  return total / used;
+  if (used === 0 || priorIndexTotal === 0) return null;
+  return (curIndexTotal / priorIndexTotal) - 1;
 }
 
 function nationalWeightFor(categoryKey: UserCategoryKey, sector: Sector): number {

@@ -105,21 +105,23 @@ npm run build
 
 ### AI explanation layer (optional)
 
-The math never depends on the LLM. If `ANTHROPIC_API_KEY` is set, the
-`/api/explain` route uses `claude-haiku-4-5` to turn the numeric result into
-2–3 sentences of plain English. Without a key, a deterministic template
-explanation is returned instead, and the UI labels which source produced it.
+The math never depends on the LLM. If `GEMINI_API_KEY` is set, the
+`/api/explain` route uses Google Gemini to turn the numeric result into
+2–3 sentences of plain English. The `/api/parse` route uses Gemini to
+parse natural-language lifestyle descriptions into spending categories.
+Without a key, a deterministic template explanation is returned instead,
+and the UI labels which source produced it.
 
 ```bash
 cp .env.example .env.local
-# edit .env.local and set ANTHROPIC_API_KEY
+# edit .env.local and set GEMINI_API_KEY
 ```
 
 ## Deployment
 
 The app is a standard Next.js App Router project and deploys to Vercel with
-no additional configuration. Set `ANTHROPIC_API_KEY` as a Vercel env var to
-enable AI explanations.
+no additional configuration. Set `GEMINI_API_KEY` as a Vercel env var to
+enable AI features.
 
 ## Design principles
 

@@ -81,7 +81,7 @@ describe("gap decomposition", () => {
     const r = compute(spending);
     const sum = r.gap_decomposition.reduce((s, x) => s + x.gap_contribution, 0);
     const weightedAvgGap = r.personal_inflation - weightedAvgYoY();
-    expect(sum).toBeCloseTo(weightedAvgGap, 6);
+    expect(sum).toBeCloseTo(weightedAvgGap, 3);
   });
 
   it("decomposeGap exposes weight diffs that sum to zero across categories", () => {

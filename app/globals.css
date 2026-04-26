@@ -4,8 +4,8 @@
 
 html,
 body {
-  background-color: #f7f7f8;
-  color: #14141b;
+  @apply bg-zinc-950 text-zinc-50;
+  color-scheme: dark;
 }
 
 /* Remove the number-input spinners — they clutter rupee inputs. */

@@ -1,11 +1,16 @@
 "use client";
 
+import { useState, useRef } from "react";
+import { toPng } from "html-to-image";
+import { Download, Sparkles, Loader2 } from "lucide-react";
+import { motion } from "framer-motion";
 import type { ComputeResult } from "@/lib/inflation/engine";
 import GapDecomposition from "./GapDecomposition";
 import TrendChart from "./TrendChart";
+import BasketComparison from "./BasketComparison";
 
 interface MonthlyPoint { month: string; personal: number; official: number }
-type Compute = ComputeResult & { monthly_series?: MonthlyPoint[]; state?: string };
+type Compute = ComputeResult & { monthly_series?: MonthlyPoint[]; state?: string; spending_raw?: any };
 
 function pct(n: number, digits = 2): string {
   return `${(n * 100).toFixed(digits)}%`;
@@ -17,25 +22,19 @@ function pp(n: number, digits = 2): string {
   return `${sign}${Math.abs(v).toFixed(digits)} pp`;
 }
 
-export default function Results({
-  result,
-  explanation,
-  explainLoading,
-  onExplain,
-}: {
-  result: Compute;
-  explanation: { text: string; source: string } | null;
-  explainLoading: boolean;
-  onExplain: () => void;
-}) {
+export default function Results({ result }: { result: Compute }) {
+  const [explanation, setExplanation] = useState<{ text: string; source: string } | null>(null);
+  const [explainLoading, setExplainLoading] = useState(false);
+  const receiptRef = useRef<HTMLDivElement>(null);
+
   const officialDisplay = result.official_headline ?? result.official_inflation;
   const displayGap = result.personal_inflation - officialDisplay;
   const gapColor =
     displayGap > 0.0005
-      ? "text-rose-600"
+      ? "text-rose-400"
       : displayGap < -0.0005
-        ? "text-emerald-600"
-        : "text-ink-500";
+        ? "text-emerald-400"
+        : "text-zinc-500";
 
   const active = result.categories.filter((c) => c.weight > 0);
   const maxAbsContribution = Math.max(
@@ -43,22 +42,163 @@ export default function Results({
     0.0001,
   );
 
+  async function explain() {
+    setExplainLoading(true);
+    setExplanation(null);
+    try {
+      const res = await fetch("/api/explain", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ spending: result.spending_raw || {}, sector: result.sector, state: result.state }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setExplanation(data);
+      }
+    } finally {
+      setExplainLoading(false);
+    }
+  }
+
+  async function downloadReceipt() {
+    if (!receiptRef.current) return;
+    try {
+      const dataUrl = await toPng(receiptRef.current, { cacheBust: true, backgroundColor: "#09090b" });
+      const link = document.createElement("a");
+      link.download = `my-inflation-${result.as_of_month}.png`;
+      link.href = dataUrl;
+      link.click();
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
   return (
-    <div className="flex flex-col gap-5">
-      <div className="rounded-xl border border-ink-200 bg-white p-5 shadow-sm">
-        <div className="grid grid-cols-3 gap-3">
-          <Stat label="Your personal inflation" value={pct(result.personal_inflation)} emphasis />
-          <Stat label="Official CPI (MoSPI)" value={pct(officialDisplay)} />
-          <Stat label="Gap" value={pp(displayGap)} valueClassName={gapColor} />
+    <div className="flex flex-col gap-6">
+      
+      {/* Receipt Card */}
+      <motion.div
+        key={result.total_spend}
+        initial={{ opacity: 0, y: 10 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4 }}
+      >
+        <div ref={receiptRef} className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6 shadow-2xl backdrop-blur-md relative overflow-hidden">
+          <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-emerald-500 to-emerald-300 opacity-50" />
+          <div className="flex items-start justify-between">
+            <div className="grid grid-cols-3 gap-6 w-full">
+              <Stat label="Your inflation" value={pct(result.personal_inflation)} emphasis />
+              <Stat label="Official CPI" value={pct(officialDisplay)} />
+              <Stat label="Gap" value={pp(displayGap)} valueClassName={gapColor} />
+            </div>
+            <button
+              onClick={downloadReceipt}
+              className="ml-4 flex-shrink-0 rounded-full bg-zinc-800 p-2 text-zinc-400 hover:bg-zinc-700 hover:text-white transition"
+              title="Download Receipt"
+            >
+              <Download className="h-4 w-4" />
+            </button>
+          </div>
+          <p className="mt-4 text-xs text-zinc-500">
+            Based on monthly spending of ₹{result.total_spend.toLocaleString("en-IN")} · as of{" "}
+            {formatMonth(result.as_of_month)} · CPI base {result.base_year}=100 · sector{" "}
+            <span className="font-medium uppercase text-zinc-400">{result.sector}</span>
+            {result.state && result.state !== "All India" && (
+              <> · <span className="font-medium text-zinc-400">{result.state}</span></>
+            )}
+          </p>
         </div>
-        <p className="mt-3 text-xs text-ink-500">
-          Based on monthly spending of ₹{result.total_spend.toLocaleString("en-IN")} · as of{" "}
-          {formatMonth(result.as_of_month)} · CPI base {result.base_year}=100 · sector{" "}
-          <span className="font-medium uppercase">{result.sector}</span>
-          {result.state && result.state !== "All India" && (
-            <> · <span className="font-medium">{result.state}</span></>
+      </motion.div>
+
+      {/* Purchasing Power Insight */}
+      {result.total_spend > 0 && (
+        <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6 shadow-sm backdrop-blur-md">
+          <h3 className="mb-4 text-sm font-semibold text-zinc-100">What This Means For Your Wallet</h3>
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div className="rounded-xl bg-zinc-950 border border-zinc-800 p-4">
+              <div className="text-xs font-medium uppercase tracking-wider text-zinc-500 mb-1">Extra cost per month</div>
+              <div className="text-2xl font-bold text-rose-400">
+                ₹{Math.round(result.total_spend * result.personal_inflation / 12).toLocaleString("en-IN")}
+              </div>
+              <div className="mt-1 text-xs text-zinc-500">
+                Your basket costs this much more each month than last year
+              </div>
+            </div>
+            <div className="rounded-xl bg-zinc-950 border border-zinc-800 p-4">
+              <div className="text-xs font-medium uppercase tracking-wider text-zinc-500 mb-1">Your ₹{Math.round(result.total_spend / 1000)}k is now worth</div>
+              <div className="text-2xl font-bold text-amber-400">
+                ₹{Math.round(result.total_spend / (1 + result.personal_inflation)).toLocaleString("en-IN")}
+              </div>
+              <div className="mt-1 text-xs text-zinc-500">
+                In last year&apos;s rupees — that&apos;s ₹{Math.round(result.total_spend - result.total_spend / (1 + result.personal_inflation)).toLocaleString("en-IN")} of lost purchasing power
+              </div>
+            </div>
+          </div>
+          {displayGap > 0.005 && (
+            <div className="mt-4 rounded-lg bg-rose-950/30 border border-rose-800/40 px-4 py-3 text-sm text-rose-200">
+              <strong>You&apos;re hit harder than average.</strong> You need{" "}
+              <span className="font-semibold text-rose-300">
+                ₹{Math.round(result.total_spend * displayGap / 12).toLocaleString("en-IN")}/mo more
+              </span>{" "}
+              than the national average household to cope with the same prices, because your spending is concentrated in higher-inflation categories.
+            </div>
           )}
-        </p>
+          {displayGap < -0.005 && (
+            <div className="mt-4 rounded-lg bg-emerald-950/30 border border-emerald-800/40 px-4 py-3 text-sm text-emerald-200">
+              <strong>You&apos;re beating the average.</strong> Your spending mix shields you from{" "}
+              <span className="font-semibold text-emerald-300">
+                ₹{Math.abs(Math.round(result.total_spend * displayGap / 12)).toLocaleString("en-IN")}/mo
+              </span>{" "}
+              of inflation impact compared to the national baseline.
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Basket Comparison */}
+      <BasketComparison rows={result.gap_decomposition} />
+
+      {/* AI Insights Card */}
+      <div className="rounded-2xl border border-emerald-900/30 bg-emerald-950/20 p-6 shadow-xl backdrop-blur-md">
+        <div className="mb-4 flex items-center justify-between">
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-emerald-400">
+            <Sparkles className="h-4 w-4" /> AI Financial Insight
+          </h3>
+          {explanation && explanation.source === "gemini" && (
+            <span className="rounded-full bg-emerald-900/50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-emerald-300">
+              Gemini AI
+            </span>
+          )}
+        </div>
+        
+        {explanation ? (
+          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+            <p className="text-sm leading-relaxed text-zinc-300">{explanation.text}</p>
+            <button
+              type="button"
+              onClick={explain}
+              disabled={explainLoading}
+              className="mt-4 text-xs font-medium text-emerald-500 hover:text-emerald-400 disabled:opacity-50"
+            >
+              {explainLoading ? "Regenerating..." : "Regenerate Insight"}
+            </button>
+          </motion.div>
+        ) : (
+          <div className="flex flex-col items-start gap-3">
+            <p className="text-sm text-zinc-400">
+              Get an AI-powered explanation of your personal inflation gap and actionable advice.
+            </p>
+            <button
+              type="button"
+              onClick={explain}
+              disabled={explainLoading}
+              className="flex items-center gap-2 rounded-full bg-emerald-600/20 px-4 py-2 text-sm font-medium text-emerald-400 border border-emerald-500/30 hover:bg-emerald-600/30 transition disabled:opacity-50"
+            >
+              {explainLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
+              {explainLoading ? "Thinking..." : "Generate Insight"}
+            </button>
+          </div>
+        )}
       </div>
 
       {result.monthly_series && result.monthly_series.length > 1 && (
@@ -67,11 +207,11 @@ export default function Results({
 
       <GapDecomposition rows={result.gap_decomposition} />
 
-      <div className="rounded-xl border border-ink-200 bg-white p-5 shadow-sm">
-        <h3 className="mb-3 text-sm font-semibold text-ink-900">
+      <div className="rounded-2xl border border-zinc-800 bg-zinc-900/40 p-6 shadow-sm">
+        <h3 className="mb-4 text-sm font-semibold text-zinc-100">
           Where your inflation comes from
         </h3>
-        <ul className="space-y-2.5">
+        <ul className="space-y-4">
           {active
             .slice()
             .sort((a, b) => Math.abs(b.contribution) - Math.abs(a.contribution))
@@ -79,73 +219,25 @@ export default function Results({
               const width = Math.max(4, (Math.abs(c.contribution) / maxAbsContribution) * 100);
               return (
                 <li key={c.key} className="text-sm">
-                  <div className="mb-1 flex items-baseline justify-between text-ink-700">
+                  <div className="mb-1 flex items-baseline justify-between text-zinc-300">
                     <span className="font-medium">{c.label}</span>
-                    <span className="tabular-nums text-ink-500">
+                    <span className="tabular-nums text-zinc-500">
                       {pct(c.weight, 0)} of spend · {pct(c.inflation)} YoY ·{" "}
-                      <span className="font-medium text-ink-800">{pp(c.contribution)}</span>
+                      <span className="font-medium text-zinc-100">{pp(c.contribution)}</span>
                     </span>
                   </div>
-                  <div className="h-1.5 w-full rounded-full bg-ink-100">
-                    <div
-                      className="h-full rounded-full bg-ink-700"
-                      style={{ width: `${width}%` }}
+                  <div className="h-1.5 w-full rounded-full bg-zinc-800 overflow-hidden">
+                    <motion.div
+                      initial={{ width: 0 }}
+                      animate={{ width: `${width}%` }}
+                      transition={{ duration: 0.8, ease: "easeOut" }}
+                      className="h-full rounded-full bg-emerald-500"
                     />
                   </div>
                 </li>
               );
             })}
         </ul>
-      </div>
-
-      <div className="rounded-xl border border-ink-200 bg-white p-5 shadow-sm">
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-ink-900">Plain-English summary</h3>
-          {explanation && (
-            <span className="rounded-full bg-ink-50 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wider text-ink-500">
-              {explanation.source === "gemini" ? "Gemini" : "Deterministic"}
-            </span>
-          )}
-        </div>
-        {explanation ? (
-          <div>
-            <p className="text-sm leading-relaxed text-ink-700">{explanation.text}</p>
-            {explanation.source === "gemini" && (
-              <button
-                type="button"
-                onClick={onExplain}
-                disabled={explainLoading}
-                className="mt-3 rounded-lg border border-ink-200 bg-white px-3 py-1 text-xs font-medium text-ink-700 hover:bg-ink-50 disabled:opacity-50"
-              >
-                {explainLoading ? "Regenerating…" : "Regenerate"}
-              </button>
-            )}
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={onExplain}
-            disabled={explainLoading}
-            className="rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-sm font-medium text-ink-800 hover:bg-ink-50 disabled:opacity-50"
-          >
-            {explainLoading ? "Thinking…" : "Explain these numbers"}
-          </button>
-        )}
-      </div>
-
-      <div className="rounded-xl border border-ink-100 bg-ink-50 px-5 py-3 text-xs text-ink-500">
-        <p>
-          Official MoSPI headline CPI (YoY):{" "}
-          <span className="font-semibold text-ink-700">{pct(officialDisplay)}</span>
-          {" · "}
-          Your personal rate:{" "}
-          <span className="font-semibold text-ink-700">{pct(result.personal_inflation)}</span>
-        </p>
-        <p className="mt-1 italic">
-          Source: MoSPI, base {result.base_year}=100, {formatMonth(result.as_of_month)}
-          {result.state && result.state !== "All India" ? `, ${result.state}` : ""}.
-          {result.state && result.state !== "All India" && " State weights use All India basket (limitation)."}
-        </p>
       </div>
     </div>
   );
@@ -164,10 +256,10 @@ function Stat({
 }) {
   return (
     <div>
-      <div className="text-xs font-medium uppercase tracking-wider text-ink-500">{label}</div>
+      <div className="text-xs font-medium uppercase tracking-wider text-zinc-500">{label}</div>
       <div
         className={`mt-1 tabular-nums ${
-          emphasis ? "text-2xl font-semibold text-ink-900" : "text-xl font-semibold text-ink-800"
+          emphasis ? "text-3xl font-bold text-white" : "text-xl font-semibold text-zinc-200"
         } ${valueClassName ?? ""}`}
       >
         {value}
