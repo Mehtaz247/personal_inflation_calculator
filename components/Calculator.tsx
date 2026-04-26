@@ -13,45 +13,45 @@ interface CategoryDescriptor {
   description: string;
 }
 
-/* ── State name → MoSPI API state_code ── */
+/* ── State name → MoSPI API state_code (alphabetical, verified against api.mospi.gov.in) ── */
 const STATE_MAP: Record<string, number> = {
   "All India": 0,
-  "Andaman And Nicobar Islands": 1,
-  "Andhra Pradesh": 2,
-  "Arunachal Pradesh": 3,
+  "Andaman And Nicobar Islands": 2,
+  "Andhra Pradesh": 3,
+  "Arunachal Pradesh": 4,
   "Assam": 5,
   "Bihar": 6,
-  "Chandigarh": 4,
-  "Chhattisgarh": 33,
-  "Goa": 7,
-  "Gujarat": 8,
-  "Haryana": 9,
-  "Himachal Pradesh": 10,
-  "Jammu And Kashmir": 11,
-  "Jharkhand": 34,
+  "Chandigarh": 7,
+  "Chhattisgarh": 8,
+  "Goa": 9,
+  "Gujarat": 10,
+  "Haryana": 11,
+  "Himachal Pradesh": 12,
+  "Jammu And Kashmir": 13,
+  "Jharkhand": 14,
   "Karnataka": 15,
   "Kerala": 16,
-  "Ladakh": 37,
-  "Lakshadweep": 12,
-  "Madhya Pradesh": 17,
-  "Maharashtra": 18,
-  "Manipur": 19,
-  "Meghalaya": 20,
-  "Mizoram": 21,
-  "Nagaland": 22,
-  "NCT of Delhi": 23,
-  "Odisha": 24,
-  "Puducherry": 25,
-  "Punjab": 27,
-  "Rajasthan": 28,
-  "Sikkim": 29,
-  "Tamil Nadu": 30,
-  "Telangana": 36,
-  "The Dadra And Nagar Haveli And Daman And Diu": 13,
-  "Tripura": 31,
-  "Uttar Pradesh": 32,
-  "Uttarakhand": 35,
-  "West Bengal": 14,
+  "Ladakh": 17,
+  "Lakshadweep": 18,
+  "Madhya Pradesh": 19,
+  "Maharashtra": 20,
+  "Manipur": 21,
+  "Meghalaya": 22,
+  "Mizoram": 23,
+  "Nagaland": 24,
+  "NCT of Delhi": 25,
+  "Odisha": 26,
+  "Puducherry": 27,
+  "Punjab": 28,
+  "Rajasthan": 29,
+  "Sikkim": 30,
+  "Tamil Nadu": 31,
+  "Telangana": 32,
+  "The Dadra And Nagar Haveli And Daman And Diu": 33,
+  "Tripura": 34,
+  "Uttar Pradesh": 35,
+  "Uttarakhand": 36,
+  "West Bengal": 37,
 };
 
 const STATES = Object.keys(STATE_MAP);
@@ -109,7 +109,7 @@ export default function Calculator({ categories }: { categories: CategoryDescrip
     if (total === 0) return null;
     const res = compute(spending, undefined, sector);
     const series = computeMonthlySeries(spending, 24, sector);
-    return { ...res, monthly_series: series, state: "All India", spending_raw: spending };
+    return { ...res, monthly_series: series, state: "All India", state_code: 0, spending_raw: spending };
   }, [spending, sector]);
 
   /* ── Fetch state-level data when state != All India ── */
@@ -133,7 +133,7 @@ export default function Calculator({ categories }: { categories: CategoryDescrip
       });
       if (res.ok) {
         const data = await res.json();
-        setStateResult({ ...data, state, spending_raw: spending });
+        setStateResult({ ...data, state, state_code: stateCode, spending_raw: spending });
       } else {
         // Fallback to All India if state fetch fails
         setStateResult(null);

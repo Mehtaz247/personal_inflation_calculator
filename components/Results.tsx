@@ -10,7 +10,7 @@ import TrendChart from "./TrendChart";
 import BasketComparison from "./BasketComparison";
 
 interface MonthlyPoint { month: string; personal: number; official: number }
-type Compute = ComputeResult & { monthly_series?: MonthlyPoint[]; state?: string; spending_raw?: any };
+type Compute = ComputeResult & { monthly_series?: MonthlyPoint[]; state?: string; state_code?: number; spending_raw?: any };
 
 function pct(n: number, digits = 2): string {
   return `${(n * 100).toFixed(digits)}%`;
@@ -25,6 +25,7 @@ function pp(n: number, digits = 2): string {
 export default function Results({ result }: { result: Compute }) {
   const [explanation, setExplanation] = useState<{ text: string; source: string } | null>(null);
   const [explainLoading, setExplainLoading] = useState(false);
+  const [explainError, setExplainError] = useState<string | null>(null);
   const receiptRef = useRef<HTMLDivElement>(null);
 
   const officialDisplay = result.official_headline ?? result.official_inflation;
@@ -45,16 +46,27 @@ export default function Results({ result }: { result: Compute }) {
   async function explain() {
     setExplainLoading(true);
     setExplanation(null);
+    setExplainError(null);
     try {
       const res = await fetch("/api/explain", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ spending: result.spending_raw || {}, sector: result.sector, state: result.state }),
+        body: JSON.stringify({
+          spending: result.spending_raw || {},
+          sector: result.sector,
+          state_code: result.state_code,
+        }),
       });
-      if (res.ok) {
-        const data = await res.json();
-        setExplanation(data);
+      const data = await res.json().catch(() => null);
+      if (res.ok && data && typeof data.text === "string") {
+        setExplanation({ text: data.text, source: data.source ?? "fallback" });
+      } else {
+        setExplainError(
+          (data && (data.detail || data.error)) || `Could not generate insight (status ${res.status}).`,
+        );
       }
+    } catch (err) {
+      setExplainError(err instanceof Error ? err.message : "Network error");
     } finally {
       setExplainLoading(false);
     }
@@ -197,6 +209,9 @@ export default function Results({ result }: { result: Compute }) {
               {explainLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
               {explainLoading ? "Thinking..." : "Generate Insight"}
             </button>
+            {explainError && (
+              <p className="text-xs text-rose-400">{explainError}</p>
+            )}
           </div>
         )}
       </div>
