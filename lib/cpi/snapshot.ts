@@ -106,6 +106,35 @@ export function listAvailableMonths(sector: Sector = DEFAULT_SECTOR): MonthKey[]
   return Array.from(months).sort() as MonthKey[];
 }
 
+/** Lookup current + prior-year index values for a COICOP food class
+ *  (e.g. "01.1.2" for meat, "01.1.3" for fish & seafood). Returns null
+ *  when either anchor is missing. */
+export function getFoodClassIndices(
+  classCode: string,
+  month: MonthKey = snapshot.as_of_month,
+  sector: Sector = DEFAULT_SECTOR,
+): { current: number; prior: number } | null {
+  const series = snapshot.sectors[sector]?.food_classes?.[classCode]?.series;
+  if (!series) return null;
+  const current = series[month];
+  const prior = series[shiftYear(month, -1)];
+  if (current == null || prior == null || prior === 0) return null;
+  return { current, prior };
+}
+
+export function foodClassYoY(
+  classCode: string,
+  month: MonthKey = snapshot.as_of_month,
+  sector: Sector = DEFAULT_SECTOR,
+): number | null {
+  const r = getFoodClassIndices(classCode, month, sector);
+  return r ? r.current / r.prior - 1 : null;
+}
+
+export function getFoodClassMeta(classCode: string, sector: Sector = DEFAULT_SECTOR) {
+  return snapshot.sectors[sector]?.food_classes?.[classCode]?.meta;
+}
+
 /** All months that have a general (headline) CPI value for the sector. */
 export function listGeneralMonths(sector: Sector = DEFAULT_SECTOR): MonthKey[] {
   const gi = snapshot.sectors[sector]?.general_index;

@@ -61,17 +61,23 @@ export async function computeForState(
 
   const gap_decomposition: GapRow[] = entries.map(({ cat, spend }) => {
     const your_weight = total > 0 ? spend / total : 0;
+    // Class-level food categories sit inside the Food division; using the
+    // parent weight would double-count, and MoSPI doesn't publish class
+    // weights at state level, so we report 0 for the national-weight
+    // column on those rows.
     let state_weight = 0;
-    for (const { subgroup } of cat.subgroups) {
-      const spec = SUBGROUP_SPECS.find(s => s.key === subgroup);
-      if (spec) {
-        state_weight += stateWeights[spec.code] ?? 0;
+    if (!cat.foodClass) {
+      for (const { subgroup } of cat.subgroups) {
+        const spec = SUBGROUP_SPECS.find(s => s.key === subgroup);
+        if (spec) {
+          state_weight += stateWeights[spec.code] ?? 0;
+        }
       }
     }
-    
+
     const categoryResult = categories.find(c => c.key === cat.key);
     const yoy = categoryResult?.inflation ?? 0;
-    
+
     const weight_diff = your_weight - state_weight;
     return {
       key: cat.key,

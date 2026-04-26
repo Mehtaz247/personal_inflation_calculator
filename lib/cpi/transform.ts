@@ -3,6 +3,12 @@ import type { CpiSnapshot, MonthKey, Sector, CpiSectorData } from "@/lib/cpi/typ
 interface CanonicalRow {
   sector: string;
   divisionName: string;
+  /** When this row is a class/sub-class level, holds the class label. */
+  className: string | null;
+  /** When this row is a class-level row, holds its parent group label. */
+  groupName: string | null;
+  /** True for sub-class rows (we don't currently store these, but flag them). */
+  isSubClass: boolean;
   code: string | null;
   indexValue: number;
   inflationPct: number | null;
@@ -72,12 +78,15 @@ function normalize(name: string): string {
   return name.toLowerCase().replace(/\s+/g, " ").replace(/&/g, "and").trim();
 }
 
+/** Food class codes we want to keep (COICOP class level under division 01). */
+export const FOOD_CLASS_CODE_RE = /^01\.\d+\.\d+$/;
+
 export function canonicalizeRow(row: Record<string, unknown>): CanonicalRow | null {
   const sector = asString(pickField(row, KEY_CANDIDATES.sector)) ?? "";
   const division = asString(pickField(row, KEY_CANDIDATES.division));
   const indexValue = asNumber(pickField(row, KEY_CANDIDATES.index));
   const code = asString(pickField(row, KEY_CANDIDATES.code));
-  const subgroup = asString(pickField(row, KEY_CANDIDATES.subgroup));
+  const groupName = asString(pickField(row, KEY_CANDIDATES.subgroup));
   const klass = asString(pickField(row, KEY_CANDIDATES.klass));
   const subClass = asString(pickField(row, KEY_CANDIDATES.subClass));
   const item = asString(pickField(row, KEY_CANDIDATES.item));
@@ -85,8 +94,29 @@ export function canonicalizeRow(row: Record<string, unknown>): CanonicalRow | nu
 
   if (!division || indexValue == null) return null;
   const isGeneral = normalize(division).includes("cpi (general)") || normalize(division) === "general";
-  if (!isGeneral && (subgroup || klass || subClass || item)) return null;
-  return { sector, divisionName: division, code, indexValue, inflationPct, isGeneral };
+
+  // We keep:
+  //  • the General row
+  //  • pure division rows (no group/class/sub_class/item)
+  //  • food *class* rows (codes 01.X.Y) — for dietary breakdown
+  //
+  // Everything else (sub_class rows, item rows, non-food groups) is dropped
+  // to keep the snapshot small and focused.
+  if (item || subClass) return null;
+  const isFoodClass = !!(code && FOOD_CLASS_CODE_RE.test(code) && klass);
+  if (!isGeneral && !isFoodClass && (groupName || klass)) return null;
+
+  return {
+    sector,
+    divisionName: division,
+    className: isFoodClass ? klass : null,
+    groupName: isFoodClass ? groupName : null,
+    isSubClass: false,
+    code,
+    indexValue,
+    inflationPct,
+    isGeneral,
+  };
 }
 
 export function pickIndexForSubgroup(rows: CanonicalRow[], spec: SubgroupSpec): number | null {
@@ -143,7 +173,28 @@ function buildSectorData(rowsByMonth: Record<MonthKey, CanonicalRow[]>, sector: 
   const subgroups = Object.fromEntries(
     SUBGROUP_SPECS.map((s) => [s.key, { label: s.label, weight: s.weight, code: s.code }]),
   );
-  return { subgroups, indices, general_index };
+
+  // Collect food-class rows per code across months.
+  const food_classes: NonNullable<CpiSectorData["food_classes"]> = {};
+  for (const [month, allRows] of Object.entries(rowsByMonth)) {
+    const sectorRows = rowsForSector(allRows, sector);
+    for (const r of sectorRows) {
+      if (!r.code || !r.className || !FOOD_CLASS_CODE_RE.test(r.code)) continue;
+      const entry = food_classes[r.code] ?? {
+        meta: { label: r.className, group: r.groupName ?? undefined, code: r.code },
+        series: {} as Record<MonthKey, number>,
+      };
+      entry.series[month as MonthKey] = round3(r.indexValue);
+      food_classes[r.code] = entry;
+    }
+  }
+
+  return {
+    subgroups,
+    indices,
+    general_index,
+    ...(Object.keys(food_classes).length > 0 ? { food_classes } : {}),
+  };
 }
 
 export function buildSnapshot(input: BuildSnapshotInput): CpiSnapshot {

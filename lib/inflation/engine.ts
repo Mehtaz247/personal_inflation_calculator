@@ -2,6 +2,7 @@ import { USER_CATEGORIES, type UserCategoryKey } from "@/lib/cpi/categories";
 import {
   headlineYoY,
   getSubgroupIndices,
+  getFoodClassIndices,
   getLatestMonth,
   getSubgroupWeight,
   getOfficialHeadline,
@@ -53,6 +54,15 @@ function bucketInflation(
 ): number | null {
   const cat = USER_CATEGORIES.find((c) => c.key === categoryKey);
   if (!cat) return null;
+
+  // Prefer COICOP class-level data when the category points at one and
+  // the snapshot actually has it for this month/sector. Otherwise fall
+  // back to division-level (the existing behavior).
+  if (cat.foodClass) {
+    const classIdx = getFoodClassIndices(cat.foodClass, month, sector);
+    if (classIdx) return classIdx.current / classIdx.prior - 1;
+  }
+
   let curIndexTotal = 0;
   let priorIndexTotal = 0;
   let used = 0;
@@ -70,6 +80,12 @@ function bucketInflation(
 function nationalWeightFor(categoryKey: UserCategoryKey, sector: Sector): number {
   const cat = USER_CATEGORIES.find((c) => c.key === categoryKey);
   if (!cat) return 0;
+  // Class-level food categories (Meat, Seafood) sit *inside* the parent
+  // Food division — using the parent weight would double-count against
+  // the headline food category. MoSPI does not publish class-level
+  // weights at base 2024, so we record 0 for the gap decomposition's
+  // national-weight column. Personal weight & inflation are unaffected.
+  if (cat.foodClass) return 0;
   let w = 0;
   for (const { subgroup } of cat.subgroups) {
     w += getSubgroupWeight(subgroup, sector);

@@ -8,10 +8,24 @@ export interface CpiSubgroupMeta {
   code?: string;
 }
 
+export interface CpiFoodClassMeta {
+  label: string;
+  group?: string;
+  code: string;
+}
+
 export interface CpiSectorData {
   subgroups: Record<string, CpiSubgroupMeta>;
   indices: Record<string, Record<MonthKey, number>>;
   general_index?: Record<MonthKey, number>;
+  /**
+   * Optional COICOP class-level indices nested within division 01
+   * (Food & beverages). Keys are class codes like "01.1.2" (meat),
+   * "01.1.3" (fish & seafood). Class-level *weights* are not stored
+   * because MoSPI does not publish them as part of the public API at
+   * base 2024 — only indices are tracked.
+   */
+  food_classes?: Record<string, { meta: CpiFoodClassMeta; series: Record<MonthKey, number> }>;
 }
 
 export interface CpiSnapshot {

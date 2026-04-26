@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useTransition, useEffect } from "react";
-import { Sparkles, Loader2, ArrowRight, AlertTriangle, User, Briefcase, GraduationCap, Heart } from "lucide-react";
+import { Sparkles, Loader2, ArrowRight, AlertTriangle, User, Briefcase, GraduationCap, Heart, Info, Leaf, Drumstick } from "lucide-react";
 import { compute, computeMonthlySeries } from "@/lib/inflation/engine";
 import type { UserCategoryKey } from "@/lib/cpi/categories";
 import type { Sector } from "@/lib/cpi/types";
@@ -91,10 +91,13 @@ const PRESETS: Preset[] = [
   },
 ];
 
+type Diet = "veg" | "non-veg";
+
 export default function Calculator({ categories }: { categories: CategoryDescriptor[] }) {
   const [spending, setSpending] = useState<Partial<Record<UserCategoryKey, number>>>({});
   const [sector, setSector] = useState<Sector>("combined");
   const [state, setState] = useState("All India");
+  const [diet, setDiet] = useState<Diet>("veg");
   const [aiText, setAiText] = useState("");
   const [parseError, setParseError] = useState<string | null>(null);
   const [isParsing, startParsingTransition] = useTransition();
@@ -104,14 +107,25 @@ export default function Calculator({ categories }: { categories: CategoryDescrip
   const [stateLoading, setStateLoading] = useState(false);
   const [stateError, setStateError] = useState<string | null>(null);
 
+  /* ── Diet filter: drop non-veg sub-categories from spending when the
+        user has selected a vegetarian diet so they don't sneak into the
+        engine via stale keys. ── */
+  const effectiveSpending = useMemo<Partial<Record<UserCategoryKey, number>>>(() => {
+    if (diet === "non-veg") return spending;
+    const { food_meat, food_seafood, ...rest } = spending;
+    void food_meat;
+    void food_seafood;
+    return rest;
+  }, [spending, diet]);
+
   /* ── All-India result (client-side, instant) ── */
   const allIndiaResult = useMemo(() => {
-    const total = Object.values(spending).reduce((s, v) => s + (v || 0), 0);
+    const total = Object.values(effectiveSpending).reduce((s, v) => s + (v || 0), 0);
     if (total === 0) return null;
-    const res = compute(spending, undefined, sector);
-    const series = computeMonthlySeries(spending, 24, sector);
-    return { ...res, monthly_series: series, state: "All India", state_code: 0, spending_raw: spending };
-  }, [spending, sector]);
+    const res = compute(effectiveSpending, undefined, sector);
+    const series = computeMonthlySeries(effectiveSpending, 24, sector);
+    return { ...res, monthly_series: series, state: "All India", state_code: 0, spending_raw: effectiveSpending };
+  }, [effectiveSpending, sector]);
 
   /* ── Invalidate stale state result the moment inputs change so the UI
         stops showing yesterday's number while a new fetch runs ── */
@@ -123,7 +137,7 @@ export default function Calculator({ categories }: { categories: CategoryDescrip
       setStateError(null);
       return;
     }
-    const total = Object.values(spending).reduce((s, v) => s + (v || 0), 0);
+    const total = Object.values(effectiveSpending).reduce((s, v) => s + (v || 0), 0);
     if (total === 0) {
       setStateResult(null);
       setStateLoading(false);
@@ -140,24 +154,21 @@ export default function Calculator({ categories }: { categories: CategoryDescrip
         const res = await fetch("/api/compute", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ spending, sector, state_code: stateCode }),
+          body: JSON.stringify({ spending: effectiveSpending, sector, state_code: stateCode }),
         });
         if (cancelled) return;
         if (res.ok) {
           const data = await res.json();
           if (data.state_error) {
-            // MoSPI state call failed; server returned All-India numbers as
-            // a fallback. Notify the user and label the result accordingly
-            // so the chart header doesn't pretend it's their state's data.
             setStateError(data.state_error);
             setStateResult({
               ...data,
               state: `${state} (All India fallback)`,
               state_code: 0,
-              spending_raw: spending,
+              spending_raw: effectiveSpending,
             });
           } else {
-            setStateResult({ ...data, state, state_code: stateCode, spending_raw: spending });
+            setStateResult({ ...data, state, state_code: stateCode, spending_raw: effectiveSpending });
           }
         } else {
           let message = `MoSPI request failed (HTTP ${res.status}).`;
@@ -184,7 +195,7 @@ export default function Calculator({ categories }: { categories: CategoryDescrip
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [state, spending, sector]);
+  }, [state, effectiveSpending, sector]);
 
   /* ── Choose which result to display ──
      When a state is selected, only show its result (or nothing while
@@ -334,6 +345,33 @@ export default function Calculator({ categories }: { categories: CategoryDescrip
                 <option value="rural">Rural</option>
               </select>
             </label>
+            <div className="flex flex-col gap-1.5 text-xs text-zinc-400">
+              Diet
+              <div className="inline-flex rounded-lg border border-zinc-800 bg-zinc-950 p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setDiet("veg")}
+                  className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                    diet === "veg"
+                      ? "bg-emerald-500/15 text-emerald-300"
+                      : "text-zinc-400 hover:text-zinc-200"
+                  }`}
+                >
+                  <Leaf className="h-3.5 w-3.5" /> Veg
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDiet("non-veg")}
+                  className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                    diet === "non-veg"
+                      ? "bg-rose-500/15 text-rose-300"
+                      : "text-zinc-400 hover:text-zinc-200"
+                  }`}
+                >
+                  <Drumstick className="h-3.5 w-3.5" /> Non-veg
+                </button>
+              </div>
+            </div>
             <button
               type="button"
               onClick={() => setSpending({})}
@@ -342,6 +380,25 @@ export default function Calculator({ categories }: { categories: CategoryDescrip
               Reset
             </button>
           </div>
+
+          {diet === "non-veg" && (
+            <div className="mb-6 flex items-start gap-2 rounded-lg border border-zinc-800 bg-zinc-950/60 px-3 py-2 text-xs text-zinc-400">
+              <Info className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 text-zinc-500" />
+              <div>
+                Meat &amp; Fish use class-level COICOP indices (codes 01.1.2 &amp;
+                01.1.3), which inflate independently from the rest of the food
+                basket. The remaining &ldquo;Food &amp; groceries&rdquo; field still
+                covers everything else (cereals, dairy, vegetables, oils, etc.).
+                {STATE_MAP[state] !== 0 && (
+                  <span className="block mt-1 text-amber-300/80">
+                    Note: state-level data only carries division-level indices, so
+                    Meat &amp; Fish fall back to the state&apos;s overall food YoY
+                    in state mode.
+                  </span>
+                )}
+              </div>
+            </div>
+          )}
 
           <p className="mb-6 text-[11px] leading-relaxed text-zinc-500">
             All India numbers are pre-bundled from the snapshot. Picking a state
@@ -359,7 +416,12 @@ export default function Calculator({ categories }: { categories: CategoryDescrip
           </p>
 
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            {categories.map((c) => (
+            {categories
+              .filter((c) => {
+                if (c.key === "food_meat" || c.key === "food_seafood") return diet === "non-veg";
+                return true;
+              })
+              .map((c) => (
               <label key={c.key} className="flex flex-col group">
                 <span className="text-sm font-medium text-zinc-300 group-hover:text-zinc-100 transition-colors">{c.label}</span>
                 <span className="mb-2 text-xs text-zinc-600 line-clamp-1" title={c.description}>{c.description}</span>

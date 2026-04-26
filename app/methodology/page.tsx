@@ -33,14 +33,17 @@ export default function MethodologyPage() {
           This tool lets you enter your own monthly spending across eleven
           consumption categories. It then replaces the national CPI weights
           with your personal weights and recomputes year-over-year inflation
-          using the same official sub-group price indices released by the
-          Ministry of Statistics and Programme Implementation (MoSPI).
+          using the same official COICOP division-level price indices released
+          by the Ministry of Statistics and Programme Implementation (MoSPI).
         </p>
 
         <h2>The formula — Laspeyres-style reweighting</h2>
         <p>
-          We use a Laspeyres-type fixed-basket approach, which is the same
-          conceptual framework underlying the official CPI:
+          We use a Laspeyres-type fixed-basket approach. The official CPI is
+          also a modified-Laspeyres index (fixed weights from a Consumer
+          Expenditure Survey base period), so this calculator follows the same
+          family of methods — it just swaps the survey-derived national weights
+          for your personal weights:
         </p>
         <p>
           <code>
@@ -61,19 +64,22 @@ export default function MethodologyPage() {
         </ul>
         <p>
           Each user-facing category maps to one or more official CPI
-          sub-groups. When a category maps to multiple sub-groups (e.g.
-          &ldquo;Household &amp; personal care&rdquo; combines Furnishings
-          and Personal care), we weight the sub-groups by their national
-          basket weights within that bucket.
+          divisions (the COICOP-2018 top-level grouping; MoSPI&apos;s 2012-base
+          series called the analogous level &ldquo;sub-groups&rdquo;). When a
+          category maps to multiple divisions (e.g. &ldquo;Household &amp;
+          personal care&rdquo; combines Furnishings with Personal care), we
+          weight the divisions by their national basket weights within that
+          bucket.
         </p>
 
         <h2>Base year and the 2012 → 2024 transition</h2>
         <p>
           India&apos;s CPI was historically computed on base year 2012=100.
-          In 2024, MoSPI transitioned to a new base (2024=100) aligned with
-          the COICOP 2018 classification. This calculator uses the{" "}
-          <strong>2024-base series</strong>, which includes twelve revised
-          sub-group classifications:
+          MoSPI announced a rebasing to <strong>2024=100</strong> aligned with
+          the COICOP-2018 classification; the new series first started
+          publishing monthly division-level indices in early 2025. This
+          calculator uses the 2024-base series, whose twelve COICOP divisions
+          are:
         </p>
         <ol>
           <li>Food and beverages</li>
@@ -90,10 +96,13 @@ export default function MethodologyPage() {
           <li>Personal care and miscellaneous</li>
         </ol>
         <p>
-          Earlier bases grouped some of these differently (e.g. the old
-          &ldquo;Miscellaneous&rdquo; bucket combined transport, health,
-          education, and personal care). The COICOP 2018 alignment provides
-          cleaner, more comparable categories.
+          The 2012-base series organised these differently — most of what
+          COICOP-2018 splits into separate divisions (Transport, Health,
+          Education, Recreation, Information &amp; communication, Personal
+          care) sat under a single parent group called &ldquo;Miscellaneous,&rdquo;
+          with each as a sub-group beneath it. The COICOP-2018 alignment
+          promotes them to first-class divisions and makes the categories
+          internationally comparable.
         </p>
 
         <h2>Exclusions</h2>
@@ -104,7 +113,12 @@ export default function MethodologyPage() {
         <ul>
           <li>Savings and investments (FDs, mutual funds, stocks, gold as investment)</li>
           <li>Asset prices (real estate purchase price, stock market values)</li>
-          <li>Loan EMIs (only the interest component is captured through imputed rent)</li>
+          <li>
+            Loan EMIs — neither principal nor mortgage interest is in CPI.
+            CPI&apos;s Housing division covers actual rent for tenants and an
+            imputed <em>rental equivalent</em> for owner-occupiers; it does
+            not track loan repayments.
+          </li>
           <li>Income tax and other direct taxes</li>
         </ul>
 
@@ -133,7 +147,7 @@ export default function MethodologyPage() {
         <p>
           The &ldquo;gap&rdquo; is defined as your personal inflation minus
           the official weighted-average inflation (both computed from the
-          same sub-group indices). We decompose this gap as:
+          same division-level indices). We decompose this gap as:
         </p>
         <p>
           <code>
@@ -160,9 +174,19 @@ export default function MethodologyPage() {
             improved quality — this is not separated out.
           </li>
           <li>
-            <strong>Sub-group granularity:</strong> MoSPI publishes twelve
-            sub-groups, not hundreds of individual items. Two households
-            within the same sub-group may experience different price changes.
+            <strong>Division granularity:</strong> we use the twelve COICOP
+            divisions MoSPI publishes monthly, not the hundreds of underlying
+            items. Two households inside the same division may experience
+            different price changes.
+          </li>
+          <li>
+            <strong>Short personal-inflation history:</strong> under the 2024
+            base, MoSPI only began publishing division-level indices in
+            January 2025. Year-over-year inflation needs the same month a year
+            earlier, so the earliest month for which a personal-inflation
+            number can be computed is January 2026. The official (general
+            index) line on the chart goes back further because the general
+            index has a longer published history.
           </li>
           <li>
             <strong>Recall accuracy:</strong> Spending estimates are only as

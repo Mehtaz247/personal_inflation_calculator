@@ -104,11 +104,28 @@ async function main() {
   const monthlyRows: Record<MonthKey, ReturnType<typeof canonicalizeRow>[]> = {};
   for (const month of monthList) {
     const [y, mm] = month.split("-").map(Number);
-    const res = await fetchCpiMonth({ base_year: args.baseYear, year: y, month_code: mm, limit: 100 });
-    if (args.logRaw) await dumpRaw(`${month}`, res.raw);
-    const canonical = res.rows.map(canonicalizeRow).filter((r): r is NonNullable<typeof r> => r != null);
+    // Page 1 carries divisions + groups; pages 2-3 carry food classes
+    // (codes 01.1.x and 01.2.x). Once we hit a page whose codes have all
+    // moved past "01.", we stop — no point pulling 600+ pages of
+    // sub-classes/items we don't store.
+    const pages = [1, 2, 3, 4, 5];
+    const aggregated: Record<string, unknown>[] = [];
+    for (const page of pages) {
+      const res = await fetchCpiMonth({ base_year: args.baseYear, year: y, month_code: mm, limit: 100, page });
+      if (args.logRaw) await dumpRaw(`${month}-p${page}`, res.raw);
+      aggregated.push(...res.rows);
+      // Bail early once we've moved past food (codes 01.x).
+      const codes = res.rows
+        .map((r) => (r as { code?: string }).code)
+        .filter((c): c is string => typeof c === "string" && c.length > 0);
+      const allPastFood = codes.length > 0 && codes.every((c) => !c.startsWith("01."));
+      if (page >= 3 && allPastFood) break;
+    }
+    const canonical = aggregated.map(canonicalizeRow).filter((r): r is NonNullable<typeof r> => r != null);
     monthlyRows[month] = canonical;
-    console.log(`[refresh-cpi] ${month}: ${res.rows.length} raw rows, ${canonical.length} canonical`);
+    console.log(
+      `[refresh-cpi] ${month}: ${aggregated.length} raw rows across pages, ${canonical.length} canonical (${canonical.filter((r) => r.className).length} food-class rows)`,
+    );
   }
 
   const sourceUrl = `https://api.mospi.gov.in/api/cpi/getCPIData?base_year=${args.baseYear}`;

@@ -10,10 +10,22 @@ const subgroupMeta = z.object({
   code: z.string().optional(),
 });
 
+const foodClassMeta = z.object({
+  label: z.string().min(1),
+  group: z.string().optional(),
+  code: z.string().min(1),
+});
+
+const foodClassEntry = z.object({
+  meta: foodClassMeta,
+  series: z.record(monthKey, z.number().positive()),
+});
+
 const sectorData = z.object({
   subgroups: z.record(z.string().min(1), subgroupMeta),
   indices: z.record(z.string().min(1), z.record(monthKey, z.number().positive())),
   general_index: z.record(monthKey, z.number().positive()).optional(),
+  food_classes: z.record(z.string().regex(/^\d{2}\.\d+(\.\d+)*$/), foodClassEntry).optional(),
 });
 
 export const cpiSnapshotSchema = z

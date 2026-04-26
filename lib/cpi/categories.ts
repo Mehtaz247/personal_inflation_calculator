@@ -3,6 +3,8 @@ import { SUBGROUP_SPECS } from "./transform";
 
 export type UserCategoryKey =
   | "food"
+  | "food_meat"
+  | "food_seafood"
   | "eating_out"
   | "housing"
   | "transport"
@@ -19,6 +21,20 @@ export interface UserCategory {
   label: string;
   description: string;
   subgroups: Array<{ subgroup: SubgroupKey; split: number }>;
+  /**
+   * Optional COICOP class code (e.g. "01.1.2") that overrides the
+   * subgroup-level mapping with class-level food data when available.
+   * If the class indices aren't in the snapshot (or for state-level
+   * fetches that don't include class rows), the engine falls back to
+   * the parent `subgroups` mapping.
+   */
+  foodClass?: string;
+  /**
+   * Categories tagged "non-veg" are only relevant when the user has
+   * indicated a non-vegetarian diet. The Calculator UI hides them by
+   * default and exposes them under a Veg/Non-veg toggle.
+   */
+  dietary?: "non-veg";
 }
 
 const W = Object.fromEntries(SUBGROUP_SPECS.map((s) => [s.key, s.weight])) as Record<SubgroupKey, number>;
@@ -34,6 +50,22 @@ export const USER_CATEGORIES: UserCategory[] = [
     label: "Food & groceries",
     description: "Groceries, vegetables, dairy, beverages cooked at home",
     subgroups: [{ subgroup: "food_and_beverages", split: 1 }],
+  },
+  {
+    key: "food_meat",
+    label: "Meat & poultry",
+    description: "Chicken, mutton, beef, pork — fresh, chilled or frozen (MoSPI groups all meat together at this level)",
+    subgroups: [{ subgroup: "food_and_beverages", split: 1 }],
+    foodClass: "01.1.2",
+    dietary: "non-veg",
+  },
+  {
+    key: "food_seafood",
+    label: "Fish & seafood",
+    description: "Fish, prawns, crab — fresh, chilled or frozen",
+    subgroups: [{ subgroup: "food_and_beverages", split: 1 }],
+    foodClass: "01.1.3",
+    dietary: "non-veg",
   },
   {
     key: "eating_out",

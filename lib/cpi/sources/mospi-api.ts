@@ -43,6 +43,8 @@ export interface CpiApiQuery {
   limit?: number;
   sector?: string;
   state_code?: number;
+  division_code?: string;
+  page?: number;
 }
 
 export interface CpiApiResponse {
@@ -98,6 +100,7 @@ export async function fetchCpiMonth(
   });
   if (query.sector) params.set("sector_code", query.sector);
   if (query.state_code != null) params.set("state_code", String(query.state_code));
+  if (query.page != null) params.set("page", String(query.page));
 
   const url = `${BASE_URL}?${params.toString()}`;
   const headers: Record<string, string> = { Accept: "application/json" };
@@ -125,10 +128,9 @@ function extractRows(payload: unknown): Record<string, unknown>[] {
     }
   }
   throw new Error(
-    `Could not find a row array in MoSPI response. Top-level keys: ${
-      payload && typeof payload === "object"
-        ? Object.keys(payload as object).join(", ")
-        : typeof payload
+    `Could not find a row array in MoSPI response. Top-level keys: ${payload && typeof payload === "object"
+      ? Object.keys(payload as object).join(", ")
+      : typeof payload
     }`,
   );
 }
