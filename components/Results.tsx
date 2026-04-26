@@ -28,10 +28,12 @@ export default function Results({
   explainLoading: boolean;
   onExplain: () => void;
 }) {
+  const officialDisplay = result.official_headline ?? result.official_inflation;
+  const displayGap = result.personal_inflation - officialDisplay;
   const gapColor =
-    result.gap > 0.0005
+    displayGap > 0.0005
       ? "text-rose-600"
-      : result.gap < -0.0005
+      : displayGap < -0.0005
         ? "text-emerald-600"
         : "text-ink-500";
 
@@ -46,8 +48,8 @@ export default function Results({
       <div className="rounded-xl border border-ink-200 bg-white p-5 shadow-sm">
         <div className="grid grid-cols-3 gap-3">
           <Stat label="Your personal inflation" value={pct(result.personal_inflation)} emphasis />
-          <Stat label="Official CPI" value={pct(result.official_inflation)} />
-          <Stat label="Gap" value={pp(result.gap)} valueClassName={gapColor} />
+          <Stat label="Official CPI (MoSPI)" value={pct(officialDisplay)} />
+          <Stat label="Gap" value={pp(displayGap)} valueClassName={gapColor} />
         </div>
         <p className="mt-3 text-xs text-ink-500">
           Based on monthly spending of ₹{result.total_spend.toLocaleString("en-IN")} · as of{" "}
