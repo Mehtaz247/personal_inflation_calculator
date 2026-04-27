@@ -97,7 +97,7 @@ export async function POST(req: NextRequest) {
   try {
     if (geminiApiKeys().length === 0) {
       return NextResponse.json(
-        { error: "GEMINI_API_KEY is not set in environment." },
+        { error: "GEMINI_API_KEY_2 is not set in environment." },
         { status: 500 }
       );
     }
