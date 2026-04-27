@@ -1,5 +1,5 @@
 export function geminiApiKeys(): string[] {
-  return [process.env.GEMINI_API_KEY, process.env.GEMINI_API_KEY_2]
+  return [process.env.GEMINI_API_KEY_2, process.env.GEMINI_API_KEY]
     .filter((k): k is string => !!k && k.length > 0);
 }
 

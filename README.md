@@ -91,9 +91,6 @@ npm run refresh:cpi -- --as-of 2026-03
 npm run refresh:cpi -- --dry-run --log-raw
 ```
 
-If MoSPI requires an API key, set `MOSPI_API_KEY` in `.env.local` (and
-in repo Settings → Secrets → Actions for the workflow).
-
 ## Running locally
 
 ```bash
