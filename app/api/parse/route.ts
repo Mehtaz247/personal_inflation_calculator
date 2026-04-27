@@ -223,7 +223,7 @@ ${body.text}
     const rawJson = await withKeyFailover(async (apiKey) => {
       const ai = new GoogleGenAI({ apiKey });
       const response = await withRetry(() => ai.models.generateContent({
-        model: "gemini-3.1-pro",
+        model: "gemini-3.1-pro-preview",
         contents: prompt,
         config: {
           responseMimeType: "application/json",
