@@ -78,8 +78,29 @@ const responseSchema = z.object({
 });
 
 function isUnavailable(err: unknown): boolean {
+  const status = (err as any)?.status;
+  const code = (err as any)?.code;
   const msg = String((err as any)?.message ?? "");
-  return (err as any)?.status === "UNAVAILABLE" || msg.includes("503") || msg.includes("high demand");
+  return (
+    status === "UNAVAILABLE" ||
+    status === "RESOURCE_EXHAUSTED" ||
+    code === 429 ||
+    code === 503 ||
+    msg.includes("503") ||
+    msg.includes("429") ||
+    msg.includes("high demand") ||
+    msg.includes("quota") ||
+    msg.includes("rate limit")
+  );
+}
+
+// Gemini sometimes embeds the error inside a successful 200 body. Detect that
+// shape so we can throw and let withKeyFailover try the next key.
+function bodyError(rawJson: unknown): { status?: string; code?: number; message?: string } | null {
+  if (!rawJson || typeof rawJson !== "object" || !("error" in rawJson)) return null;
+  const e = (rawJson as any).error;
+  if (!e) return null;
+  return { status: e.status, code: e.code, message: e.message };
 }
 
 async function withRetry<T>(fn: () => Promise<T>, retries = 2): Promise<T> {
@@ -171,34 +192,33 @@ ${body.text}
 """
 `;
 
-    const response = await withKeyFailover((apiKey) => {
+    const rawJson = await withKeyFailover(async (apiKey) => {
       const ai = new GoogleGenAI({ apiKey });
-      return withRetry(() => ai.models.generateContent({
+      const response = await withRetry(() => ai.models.generateContent({
         model: "gemini-3.1-flash-lite-preview",
         contents: prompt,
         config: {
           responseMimeType: "application/json",
         },
       }));
-    });
 
-    const text = response.text ?? "";
-    if (!text) {
-      throw new Error("No response text from Gemini");
-    }
+      const text = response.text ?? "";
+      if (!text) throw new Error("No response text from Gemini");
 
-    // Gemini sometimes returns a 503 as a JSON body instead of throwing
-    let rawJson: unknown;
-    try { rawJson = JSON.parse(text); } catch { throw new Error("Invalid JSON from Gemini"); }
-    if (rawJson && typeof rawJson === "object" && "error" in rawJson) {
-      const geminiErr = (rawJson as any).error;
-      if (geminiErr?.status === "UNAVAILABLE" || geminiErr?.code === 503) {
-        return NextResponse.json(
-          { error: "AI service is busy — please try again in a moment." },
-          { status: 503 },
-        );
+      let parsed: unknown;
+      try { parsed = JSON.parse(text); } catch { throw new Error("Invalid JSON from Gemini"); }
+
+      // Gemini sometimes embeds the error inside a 200 body — surface as a
+      // throw so withKeyFailover can try the next key.
+      const be = bodyError(parsed);
+      if (be) {
+        const err: any = new Error(be.message || `Gemini body error: ${be.status ?? be.code}`);
+        err.status = be.status;
+        err.code = be.code;
+        throw err;
       }
-    }
+      return parsed;
+    });
 
     const parsed = responseSchema.parse(rawJson);
     return NextResponse.json(parsed);
