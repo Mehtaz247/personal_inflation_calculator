@@ -187,7 +187,20 @@ ${body.text}
       throw new Error("No response text from Gemini");
     }
 
-    const parsed = responseSchema.parse(JSON.parse(text));
+    // Gemini sometimes returns a 503 as a JSON body instead of throwing
+    let rawJson: unknown;
+    try { rawJson = JSON.parse(text); } catch { throw new Error("Invalid JSON from Gemini"); }
+    if (rawJson && typeof rawJson === "object" && "error" in rawJson) {
+      const geminiErr = (rawJson as any).error;
+      if (geminiErr?.status === "UNAVAILABLE" || geminiErr?.code === 503) {
+        return NextResponse.json(
+          { error: "AI service is busy — please try again in a moment." },
+          { status: 503 },
+        );
+      }
+    }
+
+    const parsed = responseSchema.parse(rawJson);
     return NextResponse.json(parsed);
   } catch (error: any) {
     console.error("AI parse error:", error);
