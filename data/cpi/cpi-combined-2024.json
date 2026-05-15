@@ -7,7 +7,7 @@
   "as_of_month": "2026-04",
   "frequency": "monthly",
   "currency_unit": "index (base 2024 = 100)",
-  "provenance_note": "Auto-refreshed from MoSPI eSankhyiki CPI API on 2026-05-13. Division weights are MoSPI's published 2024-base CPI weights derived from HCES 2023-24 (COICOP 2018 framework).",
+  "provenance_note": "Auto-refreshed from MoSPI eSankhyiki CPI API on 2026-05-15. Division weights are MoSPI's published 2024-base CPI weights derived from HCES 2023-24 (COICOP 2018 framework).",
   "official_headline": {
     "combined": 0.035,
     "urban": 0.032,
