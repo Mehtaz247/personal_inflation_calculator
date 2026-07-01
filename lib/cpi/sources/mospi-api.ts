@@ -5,8 +5,12 @@ import { URL } from "node:url";
 const BASE_URL = "https://api.mospi.gov.in/api/cpi/getCPIData";
 const LOGIN_URL = "https://api.mospi.gov.in/api/users/login";
 
+// api.mospi.gov.in serves a chain anchored by a self-signed root that isn't
+// in the public trust store (common for .gov.in), so we can't validate it
+// the normal way. Host is hardcoded above, not user input.
 const legacyAgent = new https.Agent({
   secureOptions: crypto.constants.SSL_OP_LEGACY_SERVER_CONNECT,
+  rejectUnauthorized: false,
 });
 
 interface RequestOptions { method?: "GET" | "POST"; headers?: Record<string, string>; body?: string }
